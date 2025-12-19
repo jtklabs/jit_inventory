@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - JIT Inventory{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-speedometer2"></i> Dashboard</h2>
+</div>
+
+<!-- Stats Cards -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card stat-card primary">
+            <div class="card-body">
+                <h6 class="text-muted mb-1">Total Devices</h6>
+                <h3 class="mb-0">{{ stats.total_devices }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card success">
+            <div class="card-body">
+                <h6 class="text-muted mb-1">Active Devices</h6>
+                <h3 class="mb-0">{{ stats.active_devices }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card warning">
+            <div class="card-body">
+                <h6 class="text-muted mb-1">Vendors</h6>
+                <h3 class="mb-0">{{ stats.vendors|length }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card {% if stats.scan_stats.success_rate >= 80 %}success{% elif stats.scan_stats.success_rate >= 50 %}warning{% else %}danger{% endif %}">
+            <div class="card-body">
+                <h6 class="text-muted mb-1">Scan Success Rate</h6>
+                <h3 class="mb-0">{{ "%.1f"|format(stats.scan_stats.success_rate) }}%</h3>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Quick Actions -->
+    <div class="col-md-4 mb-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-lightning"></i> Quick Actions</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <a href="{{ url_for('single_scan') }}" class="btn btn-primary">
+                        <i class="bi bi-search"></i> Single Scan
+                    </a>
+                    <a href="{{ url_for('batch_scan') }}" class="btn btn-outline-primary">
+                        <i class="bi bi-list-check"></i> Batch Scan
+                    </a>
+                    <a href="{{ url_for('settings') }}" class="btn btn-outline-secondary">
+                        <i class="bi bi-gear"></i> Manage Credentials
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scan Stats -->
+    <div class="col-md-4 mb-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Scan Statistics</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <tr>
+                        <td>Total Scans</td>
+                        <td class="text-end"><strong>{{ stats.scan_stats.total }}</strong></td>
+                    </tr>
+                    <tr>
+                        <td>Successful</td>
+                        <td class="text-end text-success"><strong>{{ stats.scan_stats.success }}</strong></td>
+                    </tr>
+                    <tr>
+                        <td>Failed</td>
+                        <td class="text-end text-danger"><strong>{{ stats.scan_stats.failed }}</strong></td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Vendors -->
+    <div class="col-md-4 mb-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-building"></i> Vendors</h5>
+            </div>
+            <div class="card-body">
+                {% if stats.vendors %}
+                    <ul class="list-group list-group-flush">
+                        {% for vendor in stats.vendors[:5] %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                {{ vendor|capitalize }}
+                                <a href="{{ url_for('inventory', vendor=vendor) }}" class="btn btn-sm btn-outline-primary">View</a>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="text-muted mb-0">No vendors discovered yet. Run a scan to get started.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Scans -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-clock-history"></i> Recent Scans</h5>
+        <a href="{{ url_for('scan_history') }}" class="btn btn-sm btn-outline-primary">View All</a>
+    </div>
+    <div class="card-body">
+        {% if stats.recent_scans %}
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>IP Address</th>
+                            <th>Hostname</th>
+                            <th>Vendor</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for scan in stats.recent_scans %}
+                            <tr>
+                                <td>
+                                    {% if scan.scan_status == 'success' %}
+                                        <span class="badge bg-success">Success</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">Failed</span>
+                                    {% endif %}
+                                </td>
+                                <td><code>{{ scan.ip_address }}</code></td>
+                                <td>{{ scan.hostname or '-' }}</td>
+                                <td>{{ scan.vendor|capitalize if scan.vendor else '-' }}</td>
+                                <td>{{ scan.started_at.strftime('%Y-%m-%d %H:%M') if scan.started_at else '-' }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p class="text-muted mb-0">No scans yet. <a href="{{ url_for('single_scan') }}">Run your first scan</a>.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

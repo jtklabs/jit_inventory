@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}Single Scan - JIT Inventory{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-search"></i> Single Device Scan</h2>
+</div>
+
+<div class="row">
+    <div class="col-md-5">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Scan Configuration</h5>
+            </div>
+            <div class="card-body">
+                {% if error %}
+                    <div class="alert alert-danger">{{ error }}</div>
+                {% endif %}
+
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="ip_address" class="form-label">IP Address <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="ip_address" name="ip_address"
+                               placeholder="192.168.1.1" required
+                               value="{{ request.form.get('ip_address', '') }}">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="profile" class="form-label">Credential Profile <span class="text-danger">*</span></label>
+                        {% if profiles %}
+                            <select class="form-select" id="profile" name="profile" required>
+                                <option value="">Select profile...</option>
+                                <option value="__auto__" {% if request.form.get('profile') == '__auto__' %}selected{% endif %}>
+                                    Try All Profiles (auto-discover)
+                                </option>
+                                <optgroup label="Individual Profiles">
+                                {% for profile in profiles %}
+                                    <option value="{{ profile }}" {% if request.form.get('profile') == profile %}selected{% endif %}>
+                                        {{ profile }}
+                                    </option>
+                                {% endfor %}
+                                </optgroup>
+                            </select>
+                            <small class="text-muted">Auto-discover tries all profiles in priority order until one works.</small>
+                        {% else %}
+                            <div class="alert alert-warning mb-0">
+                                No credential profiles configured.
+                                <a href="{{ url_for('add_credential') }}">Add one now</a>.
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label for="port" class="form-label">Port</label>
+                            <input type="number" class="form-control" id="port" name="port"
+                                   value="{{ request.form.get('port', '161') }}" min="1" max="65535">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="timeout" class="form-label">Timeout (s)</label>
+                            <input type="number" class="form-control" id="timeout" name="timeout"
+                                   value="{{ request.form.get('timeout', '5') }}" min="1" max="60">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="retries" class="form-label">Retries</label>
+                            <input type="number" class="form-control" id="retries" name="retries"
+                                   value="{{ request.form.get('retries', '2') }}" min="0" max="5">
+                        </div>
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary" {% if not profiles %}disabled{% endif %}>
+                            <i class="bi bi-play-fill"></i> Scan Device
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-7">
+        {% if result %}
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Scan Results</h5>
+                    <span class="badge {% if result.success %}bg-success{% else %}bg-danger{% endif %}">
+                        {{ 'Success' if result.success else 'Failed' }}
+                    </span>
+                </div>
+                <div class="card-body">
+                    {% if result.success and result.device_info %}
+                        {% set device = result.device_info %}
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <h6 class="text-muted">Device Information</h6>
+                                <table class="table table-sm">
+                                    <tr><td class="text-muted">IP Address</td><td><code>{{ device.ip_address }}</code></td></tr>
+                                    <tr><td class="text-muted">Hostname</td><td>{{ device.hostname or '-' }}</td></tr>
+                                    <tr><td class="text-muted">Vendor</td><td>{{ device.vendor|capitalize if device.vendor else '-' }}</td></tr>
+                                    <tr><td class="text-muted">Device Type</td><td>{{ device.device_type or '-' }}</td></tr>
+                                    <tr><td class="text-muted">Platform</td><td>{{ device.platform or '-' }}</td></tr>
+                                </table>
+                            </div>
+                            <div class="col-md-6">
+                                <h6 class="text-muted">Hardware Details</h6>
+                                <table class="table table-sm">
+                                    <tr><td class="text-muted">Model</td><td>{{ device.model or '-' }}</td></tr>
+                                    <tr><td class="text-muted">Serial Number</td><td><code>{{ device.serial_number or '-' }}</code></td></tr>
+                                    <tr><td class="text-muted">Software Version</td><td>{{ device.software_version or '-' }}</td></tr>
+                                    <tr><td class="text-muted">Duration</td><td>{{ result.duration_ms }}ms</td></tr>
+                                </table>
+                            </div>
+                        </div>
+
+                        {% if device.sys_description %}
+                            <div class="mb-3">
+                                <h6 class="text-muted">System Description</h6>
+                                <pre class="bg-light p-2 rounded small mb-0">{{ device.sys_description }}</pre>
+                            </div>
+                        {% endif %}
+
+                        {% if device.sys_object_id %}
+                            <div class="mb-3">
+                                <h6 class="text-muted">sysObjectID</h6>
+                                <code>{{ device.sys_object_id }}</code>
+                            </div>
+                        {% endif %}
+
+                        {% if device.raw_data %}
+                            <details>
+                                <summary class="text-muted" style="cursor: pointer;">Raw SNMP Data</summary>
+                                <pre class="bg-light p-2 rounded small mt-2 mb-0">{{ device.raw_data | tojson(indent=2) }}</pre>
+                            </details>
+                        {% endif %}
+                    {% else %}
+                        <div class="alert alert-danger mb-0">
+                            <strong>Scan Failed:</strong> {{ result.error }}
+                            <br><small class="text-muted">Duration: {{ result.duration_ms }}ms</small>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        {% else %}
+            <div class="card bg-light">
+                <div class="card-body text-center py-5">
+                    <i class="bi bi-search display-1 text-muted"></i>
+                    <p class="text-muted mt-3 mb-0">Enter an IP address and select credentials to scan a device.</p>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

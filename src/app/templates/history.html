@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block title %}Scan History - JIT Inventory{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-clock-history"></i> Scan History</h2>
+</div>
+
+{% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+
+<!-- Stats -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card stat-card primary">
+            <div class="card-body py-2">
+                <h6 class="text-muted mb-0">Total Scans</h6>
+                <h4 class="mb-0">{{ stats.total }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card success">
+            <div class="card-body py-2">
+                <h6 class="text-muted mb-0">Successful</h6>
+                <h4 class="mb-0">{{ stats.success }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card danger">
+            <div class="card-body py-2">
+                <h6 class="text-muted mb-0">Failed</h6>
+                <h4 class="mb-0">{{ stats.failed }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card {% if stats.success_rate >= 80 %}success{% elif stats.success_rate >= 50 %}warning{% else %}danger{% endif %}">
+            <div class="card-body py-2">
+                <h6 class="text-muted mb-0">Success Rate</h6>
+                <h4 class="mb-0">{{ "%.1f"|format(stats.success_rate) }}%</h4>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="GET" class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label for="status" class="form-label">Status</label>
+                <select class="form-select" id="status" name="status">
+                    <option value="">All</option>
+                    <option value="success" {% if filters.status == 'success' %}selected{% endif %}>Success</option>
+                    <option value="failed" {% if filters.status == 'failed' %}selected{% endif %}>Failed</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label for="type" class="form-label">Scan Type</label>
+                <select class="form-select" id="type" name="type">
+                    <option value="">All</option>
+                    <option value="single" {% if filters.type == 'single' %}selected{% endif %}>Single</option>
+                    <option value="batch" {% if filters.type == 'batch' %}selected{% endif %}>Batch</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-funnel"></i> Filter
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Scan History Table -->
+<div class="card">
+    <div class="card-body">
+        {% if scans %}
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>IP Address</th>
+                            <th>Hostname</th>
+                            <th>Vendor</th>
+                            <th>Type</th>
+                            <th>Duration</th>
+                            <th>Credential</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for scan in scans %}
+                            <tr>
+                                <td>
+                                    {% if scan.scan_status == 'success' %}
+                                        <span class="badge bg-success">Success</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">Failed</span>
+                                    {% endif %}
+                                </td>
+                                <td><code>{{ scan.ip_address }}</code></td>
+                                <td>{{ scan.hostname or '-' }}</td>
+                                <td>{{ scan.vendor|capitalize if scan.vendor else '-' }}</td>
+                                <td>
+                                    <span class="badge bg-secondary">{{ scan.scan_type }}</span>
+                                </td>
+                                <td>{{ scan.duration_ms }}ms</td>
+                                <td>{{ scan.credential_profile_name or '-' }}</td>
+                                <td>{{ scan.started_at.strftime('%Y-%m-%d %H:%M:%S') if scan.started_at else '-' }}</td>
+                            </tr>
+                            {% if scan.error_message %}
+                                <tr class="table-danger">
+                                    <td colspan="8" class="small text-danger">
+                                        <i class="bi bi-exclamation-triangle"></i>
+                                        {{ scan.error_message }}
+                                    </td>
+                                </tr>
+                            {% endif %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="text-center py-5">
+                <i class="bi bi-clock display-1 text-muted"></i>
+                <p class="text-muted mt-3">No scan history yet.</p>
+                <a href="{{ url_for('single_scan') }}" class="btn btn-primary">
+                    <i class="bi bi-search"></i> Run a Scan
+                </a>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

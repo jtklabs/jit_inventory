@@ -1,0 +1,419 @@
+{% extends "base.html" %}
+
+{% block title %}{{ device.hostname or device.ip_address }} - JIT Inventory{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb mb-1">
+                <li class="breadcrumb-item"><a href="{{ url_for('inventory') }}">Inventory</a></li>
+                <li class="breadcrumb-item active">{{ device.hostname or device.ip_address }}</li>
+            </ol>
+        </nav>
+        <h2><i class="bi bi-hdd-network"></i> {{ device.hostname or 'Unknown' }}</h2>
+    </div>
+    <div>
+        {% if device.is_active %}
+            <span class="badge bg-success fs-6">Active</span>
+        {% else %}
+            <span class="badge bg-secondary fs-6">Inactive</span>
+        {% endif %}
+    </div>
+</div>
+
+{% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+
+<div class="row">
+    <!-- Device Overview -->
+    <div class="col-12 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-info-circle"></i> Device Information</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <tr>
+                        <th style="width: 35%;">IP Address</th>
+                        <td><code>{{ device.ip_address }}</code></td>
+                    </tr>
+                    <tr>
+                        <th>Hostname</th>
+                        <td>{{ device.hostname or '-' }}</td>
+                    </tr>
+                    <tr>
+                        <th>Vendor</th>
+                        <td>{{ device.vendor|capitalize if device.vendor else '-' }}</td>
+                    </tr>
+                    <tr>
+                        <th>Device Type</th>
+                        <td>{{ device.device_type or '-' }}</td>
+                    </tr>
+                    <tr>
+                        <th>Platform</th>
+                        <td>{{ device.platform or '-' }}</td>
+                    </tr>
+                    <tr>
+                        <th>Model</th>
+                        <td><strong>{{ device.model or '-' }}</strong></td>
+                    </tr>
+                    <tr>
+                        <th>Serial Number</th>
+                        <td><code>{{ device.serial_number or '-' }}</code></td>
+                    </tr>
+                    <tr>
+                        <th>Software Version</th>
+                        <td><code>{{ device.software_version or '-' }}</code></td>
+                    </tr>
+                    <tr>
+                        <th>sysObjectID</th>
+                        <td><small class="text-muted">{{ device.sys_object_id or '-' }}</small></td>
+                    </tr>
+                    <tr>
+                        <th>First Discovered</th>
+                        <td>{{ device.first_discovered.strftime('%Y-%m-%d %H:%M') if device.first_discovered else '-' }}</td>
+                    </tr>
+                    <tr>
+                        <th>Last Seen</th>
+                        <td>{{ device.last_seen.strftime('%Y-%m-%d %H:%M') if device.last_seen else '-' }}</td>
+                    </tr>
+                    <tr>
+                        <th>Credential Profile</th>
+                        <td>
+                            {% if device.credential_profile_name %}
+                                <span class="badge bg-success">{{ device.credential_profile_name }}</span>
+                            {% else %}
+                                <span class="text-muted">Not set</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                </table>
+
+                <!-- Action buttons -->
+                <div class="mt-3 pt-3 border-top">
+                    <form method="POST" action="{{ url_for('recheck_device_credentials', device_id=device.id) }}" class="d-inline">
+                        <button type="submit" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-arrow-repeat"></i> Re-check Credentials
+                        </button>
+                    </form>
+
+                    {% if profiles %}
+                    <form method="POST" action="{{ url_for('collect_device_inventory', device_id=device.id) }}" class="d-inline ms-2">
+                        <input type="hidden" name="profile" value="{{ device.credential_profile_name or profiles[0] }}">
+                        <button type="submit" class="btn btn-outline-primary btn-sm" {% if not device.credential_profile_name and not profiles %}disabled{% endif %}>
+                            <i class="bi bi-collection"></i> Collect Inventory
+                        </button>
+                    </form>
+                    {% endif %}
+                </div>
+                <small class="text-muted d-block mt-1">
+                    Re-check tries all profiles; Collect uses {{ device.credential_profile_name or 'first available profile' }}
+                </small>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if inventory %}
+<!-- Chassis / Stack Members -->
+{% if inventory.stack_members and inventory.stack_members|length > 0 %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-stack"></i> Stack Members</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Name</th>
+                        <th>Model</th>
+                        <th>Serial Number</th>
+                        <th>Hardware Rev</th>
+                        <th>Software Rev</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for member in inventory.stack_members %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td>{{ member.name or member.description or '-' }}</td>
+                        <td><strong>{{ member.model or '-' }}</strong></td>
+                        <td><code>{{ member.serial or '-' }}</code></td>
+                        <td>{{ member.hardware_rev or '-' }}</td>
+                        <td>{{ member.software_rev or '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% elif inventory.chassis %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-cpu"></i> Chassis</h5>
+    </div>
+    <div class="card-body">
+        <table class="table table-sm mb-0">
+            <tr>
+                <th style="width: 20%;">Description</th>
+                <td>{{ inventory.chassis.description or '-' }}</td>
+            </tr>
+            <tr>
+                <th>Model</th>
+                <td><strong>{{ inventory.chassis.model or '-' }}</strong></td>
+            </tr>
+            <tr>
+                <th>Serial Number</th>
+                <td><code>{{ inventory.chassis.serial or '-' }}</code></td>
+            </tr>
+            <tr>
+                <th>Hardware Revision</th>
+                <td>{{ inventory.chassis.hardware_rev or '-' }}</td>
+            </tr>
+            <tr>
+                <th>Software Revision</th>
+                <td>{{ inventory.chassis.software_rev or '-' }}</td>
+            </tr>
+            <tr>
+                <th>Manufacturer</th>
+                <td>{{ inventory.chassis.manufacturer or '-' }}</td>
+            </tr>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- Modules -->
+{% if inventory.modules and inventory.modules|length > 0 %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-motherboard"></i> Modules ({{ inventory.modules|length }})</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Name</th>
+                        <th>Description</th>
+                        <th>Model</th>
+                        <th>Serial Number</th>
+                        <th>Hardware Rev</th>
+                        <th>FRU</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for module in inventory.modules %}
+                    <tr>
+                        <td>{{ module.index }}</td>
+                        <td>{{ module.name or '-' }}</td>
+                        <td>{{ module.description or '-' }}</td>
+                        <td><strong>{{ module.model or '-' }}</strong></td>
+                        <td><code>{{ module.serial or '-' }}</code></td>
+                        <td>{{ module.hardware_rev or '-' }}</td>
+                        <td>
+                            {% if module.is_fru %}
+                                <span class="badge bg-success">Yes</span>
+                            {% else %}
+                                <span class="badge bg-secondary">No</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Power Supplies -->
+{% if inventory.power_supplies and inventory.power_supplies|length > 0 %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-lightning-charge"></i> Power Supplies ({{ inventory.power_supplies|length }})</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Name</th>
+                        <th>Description</th>
+                        <th>Model</th>
+                        <th>Serial Number</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for psu in inventory.power_supplies %}
+                    <tr>
+                        <td>{{ psu.index }}</td>
+                        <td>{{ psu.name or '-' }}</td>
+                        <td>{{ psu.description or '-' }}</td>
+                        <td>{{ psu.model or '-' }}</td>
+                        <td><code>{{ psu.serial or '-' }}</code></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Fans -->
+{% if inventory.fans and inventory.fans|length > 0 %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-fan"></i> Fans ({{ inventory.fans|length }})</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Name</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for fan in inventory.fans %}
+                    <tr>
+                        <td>{{ fan.index }}</td>
+                        <td>{{ fan.name or '-' }}</td>
+                        <td>{{ fan.description or '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Licenses -->
+{% if inventory.licenses and inventory.licenses|length > 0 %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-key"></i> Licenses ({{ inventory.licenses|length }})</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Feature</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Expiration</th>
+                        <th>Count</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for lic in inventory.licenses %}
+                    <tr>
+                        <td><strong>{{ lic.feature_name or '-' }}</strong></td>
+                        <td>
+                            {% if lic.is_permanent %}
+                                <span class="badge bg-success">{{ lic.license_type }}</span>
+                            {% else %}
+                                <span class="badge bg-warning text-dark">{{ lic.license_type }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if lic.status == 'in_use' %}
+                                <span class="badge bg-primary">In Use</span>
+                            {% elif lic.status == 'not_in_use' %}
+                                <span class="badge bg-secondary">Not In Use</span>
+                            {% else %}
+                                <span class="badge bg-light text-dark">{{ lic.status or '-' }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if lic.end_date == 'Never' or lic.is_permanent %}
+                                <span class="text-success">Never</span>
+                            {% elif lic.end_date %}
+                                {{ lic.end_date }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if lic.max_count and lic.max_count > 0 %}
+                                {{ lic.count_remaining or 0 }} / {{ lic.max_count }}
+                            {% else %}
+                                <span class="text-muted">Unlimited</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endif %}
+
+<!-- sysDescr -->
+{% if device.sys_description %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-file-text"></i> System Description</h5>
+    </div>
+    <div class="card-body">
+        <pre class="mb-0" style="white-space: pre-wrap;">{{ device.sys_description }}</pre>
+    </div>
+</div>
+{% endif %}
+
+<!-- Recent Scan History -->
+{% if scan_history %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-clock-history"></i> Recent Scan History</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Duration</th>
+                        <th>Profile</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for scan in scan_history %}
+                    <tr>
+                        <td>{{ scan.started_at.strftime('%Y-%m-%d %H:%M:%S') if scan.started_at else '-' }}</td>
+                        <td><span class="badge bg-info">{{ scan.scan_type }}</span></td>
+                        <td>
+                            {% if scan.scan_status == 'success' %}
+                                <span class="badge bg-success">Success</span>
+                            {% else %}
+                                <span class="badge bg-danger">Failed</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ scan.duration_ms or '-' }} ms</td>
+                        <td>{{ scan.credential_profile_name or '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

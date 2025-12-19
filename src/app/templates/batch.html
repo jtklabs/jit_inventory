@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block title %}Batch Scan - JIT Inventory{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-list-check"></i> Batch Scan</h2>
+</div>
+
+<div class="row">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Scan Configuration</h5>
+            </div>
+            <div class="card-body">
+                {% if error %}
+                    <div class="alert alert-danger">{{ error }}</div>
+                {% endif %}
+
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="targets" class="form-label">
+                            IP Addresses / CIDR Ranges <span class="text-danger">*</span>
+                        </label>
+                        <textarea class="form-control" id="targets" name="targets" rows="8"
+                                  placeholder="192.168.1.1&#10;192.168.1.0/24&#10;10.0.0.1, 10.0.0.2"
+                                  required>{{ request.form.get('targets', '') }}</textarea>
+                        <div class="form-text">
+                            Enter one IP or CIDR per line, or comma-separated.
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="profile" class="form-label">Credential Profile <span class="text-danger">*</span></label>
+                        {% if profiles %}
+                            <select class="form-select" id="profile" name="profile" required>
+                                <option value="">Select profile...</option>
+                                {% for profile in profiles %}
+                                    <option value="{{ profile }}" {% if request.form.get('profile') == profile %}selected{% endif %}>
+                                        {{ profile }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        {% else %}
+                            <div class="alert alert-warning mb-0">
+                                No credential profiles configured.
+                                <a href="{{ url_for('add_credential') }}">Add one now</a>.
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label for="concurrency" class="form-label">Concurrent</label>
+                            <input type="number" class="form-control" id="concurrency" name="concurrency"
+                                   value="{{ request.form.get('concurrency', '10') }}" min="1" max="50">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="timeout" class="form-label">Timeout (s)</label>
+                            <input type="number" class="form-control" id="timeout" name="timeout"
+                                   value="{{ request.form.get('timeout', '5') }}" min="1" max="60">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="retries" class="form-label">Retries</label>
+                            <input type="number" class="form-control" id="retries" name="retries"
+                                   value="{{ request.form.get('retries', '2') }}" min="0" max="5">
+                        </div>
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary" {% if not profiles %}disabled{% endif %}>
+                            <i class="bi bi-play-fill"></i> Start Batch Scan
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-8">
+        {% if summary %}
+            <!-- Summary Cards -->
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <div class="card stat-card primary">
+                        <div class="card-body py-2">
+                            <h6 class="text-muted mb-0">Total</h6>
+                            <h4 class="mb-0">{{ summary.total }}</h4>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card stat-card success">
+                        <div class="card-body py-2">
+                            <h6 class="text-muted mb-0">Successful</h6>
+                            <h4 class="mb-0">{{ summary.success }}</h4>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card stat-card danger">
+                        <div class="card-body py-2">
+                            <h6 class="text-muted mb-0">Failed</h6>
+                            <h4 class="mb-0">{{ summary.failed }}</h4>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results Tabs -->
+            <div class="card">
+                <div class="card-header">
+                    <ul class="nav nav-tabs card-header-tabs" role="tablist">
+                        <li class="nav-item">
+                            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#successful">
+                                Successful ({{ summary.success }})
+                            </button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#failed">
+                                Failed ({{ summary.failed }})
+                            </button>
+                        </li>
+                    </ul>
+                </div>
+                <div class="card-body">
+                    <div class="tab-content">
+                        <div class="tab-pane fade show active" id="successful">
+                            {% set successful = results | selectattr('success') | list %}
+                            {% if successful %}
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-hover mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th>IP Address</th>
+                                                <th>Hostname</th>
+                                                <th>Vendor</th>
+                                                <th>Model</th>
+                                                <th>Serial</th>
+                                                <th>Version</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for r in successful %}
+                                                {% if r.device_info %}
+                                                    <tr>
+                                                        <td><code>{{ r.device_info.ip_address }}</code></td>
+                                                        <td>{{ r.device_info.hostname or '-' }}</td>
+                                                        <td>{{ r.device_info.vendor|capitalize if r.device_info.vendor else '-' }}</td>
+                                                        <td>{{ r.device_info.model or '-' }}</td>
+                                                        <td><code>{{ r.device_info.serial_number or '-' }}</code></td>
+                                                        <td>{{ r.device_info.software_version or '-' }}</td>
+                                                    </tr>
+                                                {% endif %}
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            {% else %}
+                                <p class="text-muted mb-0">No successful scans.</p>
+                            {% endif %}
+                        </div>
+                        <div class="tab-pane fade" id="failed">
+                            {% set failed_results = results | rejectattr('success') | list %}
+                            {% if failed_results %}
+                                <ul class="list-group list-group-flush">
+                                    {% for r in failed_results %}
+                                        <li class="list-group-item text-danger">
+                                            <strong>{{ r.error }}</strong>
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            {% else %}
+                                <p class="text-muted mb-0">No failed scans.</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% else %}
+            <div class="card bg-light">
+                <div class="card-body text-center py-5">
+                    <i class="bi bi-list-check display-1 text-muted"></i>
+                    <p class="text-muted mt-3 mb-0">Enter IP addresses or CIDR ranges to scan multiple devices.</p>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

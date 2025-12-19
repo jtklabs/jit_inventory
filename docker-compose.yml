@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jt-inventory-app
+    ports:
+      - "8081:5000"
+    environment:
+      - DATABASE_URL=postgresql://inventory:inventory_pass@db:5432/inventory
+      - CREDENTIAL_BACKEND=local
+      - CREDENTIAL_PATH=/app/data/credentials
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./src:/app/src
+      - ./data/credentials:/app/data/credentials
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - inventory-network
+
+  db:
+    image: postgres:16-alpine
+    container_name: jt-inventory-db
+    environment:
+      POSTGRES_DB: inventory
+      POSTGRES_USER: inventory
+      POSTGRES_PASSWORD: inventory_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inventory -d inventory"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - inventory-network
+
+volumes:
+  postgres_data:
+
+networks:
+  inventory-network:
+    driver: bridge

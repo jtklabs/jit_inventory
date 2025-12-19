@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block title %}Inventory - JIT Inventory{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-box-seam"></i> Device Inventory</h2>
+    <span class="badge bg-primary">{{ devices|length }} devices</span>
+</div>
+
+{% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+
+<!-- Filters -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="GET" class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label for="vendor" class="form-label">Vendor</label>
+                <select class="form-select" id="vendor" name="vendor">
+                    <option value="">All Vendors</option>
+                    {% for v in vendors %}
+                        <option value="{{ v }}" {% if filters.vendor == v %}selected{% endif %}>
+                            {{ v|capitalize }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label for="type" class="form-label">Device Type</label>
+                <select class="form-select" id="type" name="type">
+                    <option value="">All Types</option>
+                    {% for t in device_types %}
+                        <option value="{{ t }}" {% if filters.type == t %}selected{% endif %}>
+                            {{ t|capitalize }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label for="status" class="form-label">Status</label>
+                <select class="form-select" id="status" name="status">
+                    <option value="">All</option>
+                    <option value="active" {% if filters.status == 'active' %}selected{% endif %}>Active</option>
+                    <option value="inactive" {% if filters.status == 'inactive' %}selected{% endif %}>Inactive</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-funnel"></i> Filter
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Devices Table -->
+<div class="card">
+    <div class="card-body">
+        {% if devices %}
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>IP Address</th>
+                            <th>Hostname</th>
+                            <th>Vendor</th>
+                            <th>Type</th>
+                            <th>Platform</th>
+                            <th>Model</th>
+                            <th>Serial</th>
+                            <th>Version</th>
+                            <th>Last Seen</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for device in devices %}
+                            <tr class="device-row" style="cursor: pointer;" onclick="window.location='{{ url_for('device_detail', device_id=device.id) }}'">
+                                <td><code>{{ device.ip_address }}</code></td>
+                                <td>{{ device.hostname or '-' }}</td>
+                                <td>{{ device.vendor|capitalize if device.vendor else '-' }}</td>
+                                <td>{{ device.device_type or '-' }}</td>
+                                <td>{{ device.platform or '-' }}</td>
+                                <td>{{ device.model or '-' }}</td>
+                                <td><code>{{ device.serial_number or '-' }}</code></td>
+                                <td>{{ device.software_version or '-' }}</td>
+                                <td>{{ device.last_seen.strftime('%Y-%m-%d %H:%M') if device.last_seen else '-' }}</td>
+                                <td>
+                                    {% if device.is_active %}
+                                        <span class="badge bg-success">Active</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Inactive</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="text-center py-5">
+                <i class="bi bi-inbox display-1 text-muted"></i>
+                <p class="text-muted mt-3">No devices found.</p>
+                <a href="{{ url_for('single_scan') }}" class="btn btn-primary">
+                    <i class="bi bi-search"></i> Run a Scan
+                </a>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
