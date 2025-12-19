@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS devices (
     last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     is_active BOOLEAN DEFAULT TRUE,
     metadata JSONB,
+    credential_profile_name VARCHAR(255),
     UNIQUE(ip_address)
 );
 
@@ -83,6 +84,7 @@ CREATE TABLE IF NOT EXISTS credential_profiles (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     is_default BOOLEAN DEFAULT FALSE,
+    priority INTEGER DEFAULT 100,
     v3_username VARCHAR(100),
     v3_auth_protocol VARCHAR(20),
     v3_priv_protocol VARCHAR(20),
@@ -99,3 +101,4 @@ CREATE INDEX IF NOT EXISTS idx_scan_history_started ON scan_history(started_at);
 CREATE INDEX IF NOT EXISTS idx_batch_jobs_status ON batch_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_batch_targets_job ON batch_job_targets(batch_job_id);
 CREATE INDEX IF NOT EXISTS idx_batch_targets_status ON batch_job_targets(status);
+CREATE INDEX IF NOT EXISTS idx_credential_profiles_priority ON credential_profiles(priority);
