@@ -61,8 +61,12 @@ class VendorRegistry:
 
         cls.register(CiscoHandler)
 
+        # Import and register Arista handler
+        from src.vendors.arista.collector import AristaHandler
+
+        cls.register(AristaHandler)
+
         # Future vendor handlers will be registered here:
-        # from src.vendors.arista.collector import AristaHandler
         # from src.vendors.juniper.collector import JuniperHandler
         # from src.vendors.fortinet.collector import FortinetHandler
         # from src.vendors.paloalto.collector import PaloAltoHandler

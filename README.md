@@ -5,7 +5,7 @@ A Python-based network device inventory tool using SNMP to collect hostname, ser
 ## Features
 
 - **Device Auto-Detection**: Automatically identifies device vendor and type via SNMP sysObjectID fingerprinting
-- **Multi-Vendor Support**: Currently supports Cisco (IOS, IOS-XE, NX-OS, ASA), with more vendors coming
+- **Multi-Vendor Support**: Supports Cisco (IOS, IOS-XE, NX-OS, ASA) and Arista (EOS), with more vendors coming
 - **SNMP v2c & v3**: Full support for SNMPv2c community strings and SNMPv3 with auth/privacy
 - **Credential Auto-Discovery**: Define multiple SNMP profiles with priority ordering - automatically finds working credentials
 - **Single & Batch Scanning**: Scan individual IPs or entire CIDR ranges
@@ -83,7 +83,7 @@ Key settings:
 | Vendor | Status | Platforms |
 |--------|--------|-----------|
 | Cisco | ✅ Supported | IOS, IOS-XE, NX-OS, ASA |
-| Arista | 🔜 Planned | EOS |
+| Arista | ✅ Supported | EOS |
 | Juniper | 🔜 Planned | JunOS |
 | F5 | 🔜 Planned | BIG-IP |
 | Fortinet | 🔜 Planned | FortiOS |
