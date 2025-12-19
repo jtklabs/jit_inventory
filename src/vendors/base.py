@@ -6,6 +6,22 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+# Standard Entity MIB OIDs (RFC 4133) - used by most vendors
+ENTITY_MIB_OIDS = {
+    "entPhysicalDescr": "1.3.6.1.2.1.47.1.1.1.1.2",
+    "entPhysicalClass": "1.3.6.1.2.1.47.1.1.1.1.5",
+    "entPhysicalName": "1.3.6.1.2.1.47.1.1.1.1.7",
+    "entPhysicalSoftwareRev": "1.3.6.1.2.1.47.1.1.1.1.10",
+    "entPhysicalSerialNum": "1.3.6.1.2.1.47.1.1.1.1.11",
+    "entPhysicalModelName": "1.3.6.1.2.1.47.1.1.1.1.13",
+}
+
+# Entity physical class values
+ENTITY_CLASS_CHASSIS = 3
+ENTITY_CLASS_MODULE = 9
+ENTITY_CLASS_STACK = 11
+
+
 @dataclass
 class DeviceInfo:
     """Standardized device information across all vendors."""
@@ -96,3 +112,119 @@ class VendorHandler(ABC):
             sys_descr: sysDescr string for fallback parsing (optional)
         """
         pass
+
+    def parse_basic_info_from_entity_walk(
+        self, walk_results: dict[str, list[tuple[str, str]]], sys_descr: str | None = None
+    ) -> dict[str, Any]:
+        """
+        Extract basic device info (serial, model, version) from Entity MIB walk results.
+
+        This method uses entity class to find the chassis component rather than
+        hardcoded indices, making it work across different device models.
+
+        Args:
+            walk_results: Dict mapping OID name to list of (full_oid, value) tuples
+                          Expected keys: entPhysicalClass, entPhysicalSerialNum,
+                                        entPhysicalModelName, entPhysicalSoftwareRev
+
+        Returns:
+            Dict with serial_number, model, software_version (any may be None)
+        """
+        result: dict[str, Any] = {
+            "serial_number": None,
+            "model": None,
+            "software_version": None,
+        }
+
+        # Build a map of index -> data from walk results
+        entities: dict[int, dict[str, Any]] = {}
+
+        def get_index(oid: str, base_oid: str) -> int | None:
+            """Extract entity index from full OID."""
+            suffix = oid.replace(base_oid + ".", "")
+            try:
+                return int(suffix.split(".")[0])
+            except (ValueError, IndexError):
+                return None
+
+        # Parse entity classes first to identify chassis/stack members
+        class_results = walk_results.get("entPhysicalClass", [])
+        for full_oid, value in class_results:
+            idx = get_index(full_oid, ENTITY_MIB_OIDS["entPhysicalClass"])
+            if idx is not None:
+                try:
+                    entities[idx] = {"class": int(value)}
+                except ValueError:
+                    pass
+
+        # Parse serial numbers
+        serial_results = walk_results.get("entPhysicalSerialNum", [])
+        for full_oid, value in serial_results:
+            idx = get_index(full_oid, ENTITY_MIB_OIDS["entPhysicalSerialNum"])
+            if idx is not None and value and value.strip():
+                if idx not in entities:
+                    entities[idx] = {}
+                entities[idx]["serial"] = value.strip()
+
+        # Parse model names
+        model_results = walk_results.get("entPhysicalModelName", [])
+        for full_oid, value in model_results:
+            idx = get_index(full_oid, ENTITY_MIB_OIDS["entPhysicalModelName"])
+            if idx is not None and value and value.strip():
+                if idx not in entities:
+                    entities[idx] = {}
+                entities[idx]["model"] = value.strip()
+
+        # Parse software revisions
+        sw_results = walk_results.get("entPhysicalSoftwareRev", [])
+        for full_oid, value in sw_results:
+            idx = get_index(full_oid, ENTITY_MIB_OIDS["entPhysicalSoftwareRev"])
+            if idx is not None and value and value.strip():
+                if idx not in entities:
+                    entities[idx] = {}
+                entities[idx]["software_rev"] = value.strip()
+
+        # Find chassis or stack components (class 3 or 11) with serial numbers
+        chassis_candidates = []
+        for idx, data in entities.items():
+            entity_class = data.get("class", 0)
+            if entity_class in (ENTITY_CLASS_CHASSIS, ENTITY_CLASS_STACK):
+                if data.get("serial"):
+                    chassis_candidates.append((idx, data))
+
+        # Sort by index (lower typically = main chassis or stack master)
+        chassis_candidates.sort(key=lambda x: x[0])
+
+        if chassis_candidates:
+            # Use first chassis/stack with a serial number
+            _, chassis_data = chassis_candidates[0]
+            result["serial_number"] = chassis_data.get("serial")
+            result["model"] = chassis_data.get("model")
+            result["software_version"] = chassis_data.get("software_rev")
+        else:
+            # Fallback: find any entity with serial number (preferring lower index)
+            serial_candidates = [
+                (idx, data) for idx, data in entities.items() if data.get("serial")
+            ]
+            serial_candidates.sort(key=lambda x: x[0])
+
+            if serial_candidates:
+                _, fallback_data = serial_candidates[0]
+                result["serial_number"] = fallback_data.get("serial")
+                result["model"] = fallback_data.get("model")
+                result["software_version"] = fallback_data.get("software_rev")
+
+        return result
+
+    def get_entity_walk_oids(self) -> dict[str, str]:
+        """
+        Return Entity MIB OIDs to walk for basic device info.
+
+        Override in subclass if vendor needs different OIDs.
+        """
+        return {
+            "entPhysicalClass": ENTITY_MIB_OIDS["entPhysicalClass"],
+            "entPhysicalSerialNum": ENTITY_MIB_OIDS["entPhysicalSerialNum"],
+            "entPhysicalModelName": ENTITY_MIB_OIDS["entPhysicalModelName"],
+            "entPhysicalSoftwareRev": ENTITY_MIB_OIDS["entPhysicalSoftwareRev"],
+        }

@@ -104,28 +104,26 @@ class DeviceScanner:
             if device_info is None:
                 raise ScanError("Fingerprinting returned no device info")
 
-            # Step 2: Collect vendor-specific data
+            # Step 2: Collect vendor-specific data using Entity MIB table walking
+            # This approach finds chassis info by entity class rather than hardcoded
+            # indices, making it work across different device models
             if device_info.vendor and device_info.vendor != "unknown":
                 handler = VendorRegistry.get_handler(device_info.vendor)
                 if handler:
                     try:
-                        collection_oids = handler.get_collection_oids()
-                        raw_data = await client.get_bulk(
-                            list(collection_oids.values()),
-                            credential,
-                        )
+                        walk_oids = handler.get_entity_walk_oids()
+                        walk_results: dict[str, list[tuple[str, str]]] = {}
 
-                        # Map OID values back to field names
-                        raw_mapped = {}
-                        for name, oid in collection_oids.items():
-                            for response_oid, value in raw_data.items():
-                                if oid in response_oid:
-                                    raw_mapped[name] = value
-                                    break
+                        for name, base_oid in walk_oids.items():
+                            try:
+                                results = await client.walk(base_oid, credential, max_rows=50)
+                                walk_results[name] = results
+                            except SNMPError:
+                                walk_results[name] = []
 
-                        # Parse vendor-specific data (pass sysDescr for fallback parsing)
-                        parsed = handler.parse_collected_data(
-                            raw_mapped, sys_descr=device_info.sys_description
+                        # Parse using entity class-based detection
+                        parsed = handler.parse_basic_info_from_entity_walk(
+                            walk_results, sys_descr=device_info.sys_description
                         )
 
                         # Update device info - prefer Entity MIB data over sysDescr
@@ -133,11 +131,15 @@ class DeviceScanner:
                             device_info.serial_number = parsed["serial_number"]
                         if parsed.get("software_version"):
                             device_info.software_version = parsed["software_version"]
-                        # Prefer exact model from Entity MIB over generic sysDescr model
                         if parsed.get("model"):
                             device_info.model = parsed["model"]
 
-                        device_info.raw_data = raw_mapped
+                        # Store raw walk data for debugging
+                        device_info.raw_data = {
+                            name: [(oid, val) for oid, val in results]
+                            for name, results in walk_results.items()
+                            if results
+                        }
 
                     except SNMPError:
                         # Continue with fingerprint data if collection fails

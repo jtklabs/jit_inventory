@@ -1,13 +1,11 @@
-FROM python:3.11-slim
+FROM bitnami/python:latest
 
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
-    libpq-dev \
-    gcc \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Note: psycopg2-binary includes pre-compiled PostgreSQL client, no libpq-dev needed
+USER root
+RUN install_packages curl
 
 # Copy all project files (src needed for editable install)
 COPY pyproject.toml .
@@ -18,7 +16,10 @@ COPY src/ ./src/
 RUN pip install --no-cache-dir -e .
 
 # Create data directory
-RUN mkdir -p /app/data/credentials
+RUN mkdir -p /app/data/credentials && chown -R 1001:1001 /app/data
+
+# Switch back to non-root user
+USER 1001
 
 # Set PYTHONPATH to ensure src is importable
 ENV PYTHONPATH=/app
