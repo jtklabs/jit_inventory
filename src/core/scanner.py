@@ -1,9 +1,12 @@
 """
 Main scanner orchestrator - coordinates fingerprinting and data collection.
 """
+import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from src.config.settings import get_settings
 from src.db.connection import get_db_session
@@ -330,8 +333,9 @@ class DeviceScanner:
 
                 return scan.id
 
-        except Exception:
-            # Don't fail the scan if DB save fails
+        except Exception as e:
+            # Log error but don't fail the scan if DB save fails
+            logger.error(f"Failed to save successful scan to database: {e}", exc_info=True)
             return None
 
     def _save_failed_scan(
@@ -358,5 +362,6 @@ class DeviceScanner:
                 )
                 return scan.id
 
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to save failed scan to database: {e}", exc_info=True)
             return None

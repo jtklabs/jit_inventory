@@ -2,9 +2,18 @@
 Flask application for Network Device Inventory.
 """
 import asyncio
+import logging
+import os
 from functools import wraps
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
+
+# Configure logging
+log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, log_level, logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 
 from src.config.settings import get_settings
 from src.core.ip_utils import is_valid_ip, parse_targets, estimate_target_count
