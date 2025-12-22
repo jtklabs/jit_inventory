@@ -20,13 +20,11 @@ from src.core.ip_utils import is_valid_ip, parse_targets, estimate_target_count
 from src.core.scanner import DeviceScanner
 from src.credentials import get_credential_provider
 from src.credentials.models import SNMPv2cProfile, SNMPv3Profile
-from sqlalchemy.orm.attributes import flag_modified
 from src.db.connection import get_db_session
 from src.db.repositories.device import DeviceRepository
 from src.db.repositories.scan import ScanHistoryRepository
 from src.scheduler import get_scheduler
-from src.snmp.client import SNMPClient, AuthProtocol, PrivProtocol
-from src.vendors.registry import VendorRegistry
+from src.snmp.client import AuthProtocol, PrivProtocol
 
 app = Flask(__name__)
 app.secret_key = "dev-secret-key-change-in-production"
@@ -291,10 +289,6 @@ def device_detail(device_id):
     scan_history = []
     error = None
 
-    # Get credential profiles for refresh capability
-    cred_provider = get_credential_provider()
-    profiles = run_async(cred_provider.list_profiles())
-
     try:
         with get_db_session() as session:
             device_repo = DeviceRepository(session)
@@ -320,7 +314,6 @@ def device_detail(device_id):
         device=device,
         inventory=inventory,
         scan_history=scan_history,
-        profiles=profiles,
         error=error,
     )
 
@@ -387,9 +380,9 @@ def refresh_all_devices():
     return redirect(url_for("inventory"))
 
 
-@app.route("/inventory/<device_id>/recheck-credentials", methods=["POST"])
-def recheck_device_credentials(device_id):
-    """Re-check credentials for a device by trying all profiles in order."""
+@app.route("/inventory/<device_id>/rescan", methods=["POST"])
+def rescan_device(device_id):
+    """Rescan a device - tries all profiles and collects full inventory."""
     try:
         # Get device from DB
         with get_db_session() as session:
@@ -410,225 +403,23 @@ def recheck_device_credentials(device_id):
             flash("No credential profiles configured", "danger")
             return redirect(url_for("device_detail", device_id=device_id))
 
-        # Try each profile until one works
+        # Rescan with auto-discover (now includes full inventory collection)
         scanner = DeviceScanner()
         scan_result = run_async(
             scanner.scan_device_auto_discover(
                 ip_address=ip_address,
                 profiles=all_profiles,
-                scan_type="recheck",
+                scan_type="rescan",
             )
         )
 
         if scan_result.success:
-            flash(f"Credentials verified! Working profile: {scan_result.credential_profile_name}", "success")
+            flash(f"Device rescanned successfully using profile '{scan_result.credential_profile_name}'", "success")
         else:
-            flash(f"No working credentials found: {scan_result.error}", "warning")
+            flash(f"Rescan failed: {scan_result.error}", "warning")
 
     except Exception as e:
-        flash(f"Error checking credentials: {e}", "danger")
-
-    return redirect(url_for("device_detail", device_id=device_id))
-
-
-@app.route("/inventory/<device_id>/collect", methods=["POST"])
-def collect_device_inventory(device_id):
-    """Collect detailed hardware inventory from device via SNMP."""
-    import time
-
-    profile_name = request.form.get("profile")
-    start_time = time.time()
-
-    if not profile_name:
-        flash("Please select a credential profile", "danger")
-        return redirect(url_for("device_detail", device_id=device_id))
-
-    # Variables for scan history
-    ip_address = None
-    vendor = None
-    device_info = {}
-
-    try:
-        # Get device from DB
-        with get_db_session() as session:
-            device_repo = DeviceRepository(session)
-            device = device_repo.get_by_id(device_id)
-
-            if not device:
-                flash("Device not found", "danger")
-                return redirect(url_for("inventory"))
-
-            ip_address = device.ip_address
-            vendor = device.vendor
-            # Capture device info for scan history
-            device_info = {
-                "hostname": device.hostname,
-                "vendor": device.vendor,
-                "device_type": device.device_type,
-                "platform": device.platform,
-                "model": device.model,
-                "serial_number": device.serial_number,
-                "software_version": device.software_version,
-                "sys_object_id": device.sys_object_id,
-                "sys_description": device.sys_description,
-            }
-
-        # Get credential
-        cred_provider = get_credential_provider()
-        profile = run_async(cred_provider.get_profile(profile_name))
-
-        if not profile:
-            flash(f"Profile '{profile_name}' not found", "danger")
-            return redirect(url_for("device_detail", device_id=device_id))
-
-        # Get vendor handler
-        handler = VendorRegistry.get_handler(vendor) if vendor else None
-
-        if not handler:
-            flash(f"No handler for vendor: {vendor}", "warning")
-            return redirect(url_for("device_detail", device_id=device_id))
-
-        # Check if handler supports entity MIB collection
-        if not hasattr(handler, "get_entity_mib_oids"):
-            flash(f"Handler for {vendor} does not support inventory collection", "warning")
-            return redirect(url_for("device_detail", device_id=device_id))
-
-        # Collect Entity MIB and License MIB data
-        async def collect_inventory():
-            settings = get_settings()
-            client = SNMPClient(
-                host=ip_address,
-                port=161,
-                timeout=settings.snmp_timeout,
-                retries=settings.snmp_retries,
-            )
-            credential = profile.to_snmp_credential()
-
-            # Walk Entity MIB tables
-            entity_oids = handler.get_entity_mib_oids()
-            walk_results = {}
-
-            for oid_name, base_oid in entity_oids.items():
-                try:
-                    results = await client.walk(base_oid, credential, max_rows=500)
-                    walk_results[oid_name] = results
-                except Exception as walk_error:
-                    print(f"Error walking {oid_name}: {walk_error}")
-                    walk_results[oid_name] = []
-
-            inventory = handler.parse_entity_table(walk_results)
-
-            # Also parse basic info (serial, model, version) using the walk OIDs
-            basic_walk_oids = handler.get_entity_walk_oids()
-            basic_walk_results = {}
-            for oid_name, base_oid in basic_walk_oids.items():
-                try:
-                    results = await client.walk(base_oid, credential, max_rows=50)
-                    basic_walk_results[oid_name] = results
-                except Exception:
-                    basic_walk_results[oid_name] = []
-
-            basic_info = handler.parse_basic_info_from_entity_walk(
-                basic_walk_results, sys_descr=device_info.get("sys_description")
-            )
-
-            # Walk License MIB if handler supports it
-            if hasattr(handler, "get_license_mib_oids"):
-                license_oids = handler.get_license_mib_oids()
-                license_walk_results = {}
-
-                for oid_name, base_oid in license_oids.items():
-                    try:
-                        results = await client.walk(base_oid, credential, max_rows=200)
-                        license_walk_results[oid_name] = results
-                    except Exception as walk_error:
-                        print(f"Error walking license {oid_name}: {walk_error}")
-                        license_walk_results[oid_name] = []
-
-                # Parse licenses and add to inventory
-                if any(license_walk_results.values()):
-                    licenses = handler.parse_license_table(license_walk_results)
-                    inventory.licenses = licenses
-
-            return inventory, basic_info
-
-        inventory, basic_info = run_async(collect_inventory())
-        duration_ms = int((time.time() - start_time) * 1000)
-
-        # Save inventory to device metadata and create scan history
-        with get_db_session() as session:
-            device_repo = DeviceRepository(session)
-            scan_repo = ScanHistoryRepository(session)
-
-            device = device_repo.get_by_id(device_id)
-            if device:
-                # Create new dict to ensure SQLAlchemy detects change
-                metadata = dict(device.metadata_) if device.metadata_ else {}
-                metadata["inventory"] = inventory.to_dict()
-                device.metadata_ = metadata
-                flag_modified(device, "metadata_")  # Ensure JSONB change is detected
-
-                # Update device fields from fresh SNMP data
-                if basic_info.get("serial_number"):
-                    device.serial_number = basic_info["serial_number"]
-                if basic_info.get("model"):
-                    device.model = basic_info["model"]
-                if basic_info.get("software_version"):
-                    device.software_version = basic_info["software_version"]
-
-                # Determine SNMP version from profile
-                from src.credentials.models import SNMPv2cProfile
-                snmp_version = "v2c" if isinstance(profile, SNMPv2cProfile) else "v3"
-
-                # Create scan history entry
-                scan_repo.create(
-                    ip_address=ip_address,
-                    scan_type="inventory",
-                    scan_status="success",
-                    device_id=device.id,
-                    hostname=device_info.get("hostname"),
-                    vendor=device_info.get("vendor"),
-                    device_type=device_info.get("device_type"),
-                    platform=device_info.get("platform"),
-                    model=device_info.get("model"),
-                    serial_number=device_info.get("serial_number"),
-                    software_version=device_info.get("software_version"),
-                    sys_object_id=device_info.get("sys_object_id"),
-                    sys_description=device_info.get("sys_description"),
-                    raw_snmp_data=inventory.to_dict(),
-                    duration_ms=duration_ms,
-                    credential_profile_name=profile_name,
-                    snmp_version=snmp_version,
-                )
-
-                session.commit()
-
-        license_msg = f", {len(inventory.licenses)} licenses" if inventory.licenses else ""
-        flash(f"Collected inventory: {len(inventory.modules)} modules, "
-              f"{len(inventory.stack_members)} stack members{license_msg}", "success")
-
-    except Exception as e:
-        duration_ms = int((time.time() - start_time) * 1000)
-
-        # Save failed scan to history
-        if ip_address:
-            try:
-                with get_db_session() as session:
-                    scan_repo = ScanHistoryRepository(session)
-                    scan_repo.create(
-                        ip_address=ip_address,
-                        scan_type="inventory",
-                        scan_status="failed",
-                        device_id=device_id,
-                        error_message=str(e),
-                        duration_ms=duration_ms,
-                        credential_profile_name=profile_name,
-                        snmp_version="v2c",  # Default, we may not know
-                    )
-            except Exception:
-                pass  # Don't fail if we can't save history
-
-        flash(f"Error collecting inventory: {e}", "danger")
+        flash(f"Error rescanning device: {e}", "danger")
 
     return redirect(url_for("device_detail", device_id=device_id))
 

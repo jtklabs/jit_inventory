@@ -93,23 +93,14 @@
 
                 <!-- Action buttons -->
                 <div class="mt-3 pt-3 border-top">
-                    <form method="POST" action="{{ url_for('recheck_device_credentials', device_id=device.id) }}" class="d-inline">
+                    <form method="POST" action="{{ url_for('rescan_device', device_id=device.id) }}" class="d-inline">
                         <button type="submit" class="btn btn-outline-primary btn-sm">
-                            <i class="bi bi-arrow-repeat"></i> Re-check Credentials
+                            <i class="bi bi-arrow-clockwise"></i> Rescan Device
                         </button>
                     </form>
-
-                    {% if profiles %}
-                    <form method="POST" action="{{ url_for('collect_device_inventory', device_id=device.id) }}" class="d-inline ms-2">
-                        <input type="hidden" name="profile" value="{{ device.credential_profile_name or profiles[0] }}">
-                        <button type="submit" class="btn btn-outline-primary btn-sm" {% if not device.credential_profile_name and not profiles %}disabled{% endif %}>
-                            <i class="bi bi-collection"></i> Collect Inventory
-                        </button>
-                    </form>
-                    {% endif %}
                 </div>
                 <small class="text-muted d-block mt-1">
-                    Re-check tries all profiles; Collect uses {{ device.credential_profile_name or 'first available profile' }}
+                    Rescan tries all credential profiles and collects full inventory
                 </small>
             </div>
         </div>

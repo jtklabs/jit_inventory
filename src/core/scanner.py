@@ -108,25 +108,36 @@ class DeviceScanner:
                 raise ScanError("Fingerprinting returned no device info")
 
             # Step 2: Collect vendor-specific data using Entity MIB table walking
-            # This approach finds chassis info by entity class rather than hardcoded
-            # indices, making it work across different device models
+            # This does a full inventory collection (modules, stack members, licenses)
+            # in addition to basic info (serial, model, version)
             if device_info.vendor and device_info.vendor != "unknown":
                 handler = VendorRegistry.get_handler(device_info.vendor)
                 if handler:
                     try:
-                        walk_oids = handler.get_entity_walk_oids()
-                        walk_results: dict[str, list[tuple[str, str]]] = {}
+                        # Walk Entity MIB for full inventory (500 rows for complete data)
+                        entity_walk_results: dict[str, list[tuple[str, str]]] = {}
+                        if hasattr(handler, "get_entity_mib_oids"):
+                            entity_oids = handler.get_entity_mib_oids()
+                            for name, base_oid in entity_oids.items():
+                                try:
+                                    results = await client.walk(base_oid, credential, max_rows=500)
+                                    entity_walk_results[name] = results
+                                except SNMPError:
+                                    entity_walk_results[name] = []
 
+                        # Also walk basic OIDs for serial/model/version parsing
+                        basic_walk_results: dict[str, list[tuple[str, str]]] = {}
+                        walk_oids = handler.get_entity_walk_oids()
                         for name, base_oid in walk_oids.items():
                             try:
                                 results = await client.walk(base_oid, credential, max_rows=50)
-                                walk_results[name] = results
+                                basic_walk_results[name] = results
                             except SNMPError:
-                                walk_results[name] = []
+                                basic_walk_results[name] = []
 
-                        # Parse using entity class-based detection
+                        # Parse basic info (serial, model, version)
                         parsed = handler.parse_basic_info_from_entity_walk(
-                            walk_results, sys_descr=device_info.sys_description
+                            basic_walk_results, sys_descr=device_info.sys_description
                         )
 
                         # Update device info - prefer Entity MIB data over sysDescr
@@ -137,16 +148,41 @@ class DeviceScanner:
                         if parsed.get("model"):
                             device_info.model = parsed["model"]
 
-                        # Store raw walk data for debugging
-                        device_info.raw_data = {
-                            name: [(oid, val) for oid, val in results]
-                            for name, results in walk_results.items()
-                            if results
-                        }
+                        # Parse full inventory (modules, stack members)
+                        inventory = None
+                        if entity_walk_results and hasattr(handler, "parse_entity_table"):
+                            inventory = handler.parse_entity_table(entity_walk_results)
+
+                        # Walk and parse license info if handler supports it
+                        if hasattr(handler, "get_license_mib_oids") and hasattr(handler, "parse_license_table"):
+                            license_oids = handler.get_license_mib_oids()
+                            license_walk_results: dict[str, list[tuple[str, str]]] = {}
+                            for name, base_oid in license_oids.items():
+                                try:
+                                    results = await client.walk(base_oid, credential, max_rows=200)
+                                    license_walk_results[name] = results
+                                except SNMPError:
+                                    license_walk_results[name] = []
+
+                            if any(license_walk_results.values()) and inventory:
+                                licenses = handler.parse_license_table(license_walk_results)
+                                inventory.licenses = licenses
+
+                        # Store inventory in raw_data for saving to metadata
+                        if inventory:
+                            device_info.raw_data = {"inventory": inventory.to_dict()}
+                        else:
+                            device_info.raw_data = {
+                                name: [(oid, val) for oid, val in results]
+                                for name, results in basic_walk_results.items()
+                                if results
+                            }
 
                     except SNMPError:
                         # Continue with fingerprint data if collection fails
                         pass
+                    except Exception as e:
+                        logger.warning(f"Error collecting inventory for {ip_address}: {e}")
 
             duration_ms = int((time.time() - start_time) * 1000)
 
