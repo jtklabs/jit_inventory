@@ -292,11 +292,14 @@ class CiscoHandler(VendorHandler):
             (r"(C\d{4}[A-Z]?)\s+Software", "Catalyst {}"),
             # Generic Catalyst
             (r"Catalyst\s+(\d{4}[A-Z0-9\-]*)", "Catalyst {}"),
-            # ISR routers
+            # ISR routers - various formats
             (r"(ISR\d{4}[A-Z0-9\-]*)", "{}"),
-            (r"CISCO(\d{4}[A-Z0-9\-]*)\s", "ISR {}"),
+            (r"CISCO(\d{4}[A-Z0-9\-/]*)\s", "ISR {}"),
+            (r"cisco (ISR\d+[A-Z0-9\-/]*)", "{}"),
+            (r"C(\d{4}[A-Z]?) Software.*Router", "ISR {}"),
             # ASR routers
             (r"(ASR\d{4}[A-Z0-9\-]*)", "{}"),
+            (r"(ASR-\d{4}[A-Z0-9\-]*)", "{}"),
             # ASA firewalls
             (r"(ASA\d{4}[A-Z0-9\-]*)", "{}"),
             (r"Cisco Adaptive Security Appliance.*?(55\d{2}[A-Z0-9\-]*)", "ASA {}"),
@@ -327,6 +330,13 @@ class CiscoHandler(VendorHandler):
                 result["device_type"] = "Firewall"
             elif any(x in model_lower for x in ["air-ct", "c9800", "wlc"]):
                 result["device_type"] = "Wireless Controller"
+
+        # If we still don't have device_type, infer from sysDescr content
+        if not result["device_type"]:
+            if "router" in sys_descr_lower:
+                result["device_type"] = "Router"
+            elif "switch" in sys_descr_lower:
+                result["device_type"] = "Switch"
 
         return result
 
@@ -456,7 +466,7 @@ class CiscoHandler(VendorHandler):
 
         # Pattern for "Version X.X.X" or "Version X.X(X)X"
         version_patterns = [
-            # IOS-XE style: "Version 17.03.03"
+            # IOS-XE style: "Version 17.03.03" - also handles "Codename 17.03.03"
             r"Version\s+(\d+\.\d+\.\d+[a-zA-Z0-9]*)",
             # IOS style: "Version 12.2(44)SE4" or "Version 15.2(4)M1"
             r"Version\s+(\d+\.\d+\(\d+\)[A-Z]+\d*)",
@@ -471,7 +481,13 @@ class CiscoHandler(VendorHandler):
         for pattern in version_patterns:
             match = re.search(pattern, sys_descr, re.I)
             if match:
-                return match.group(1)
+                version = match.group(1)
+                # Strip codename prefix if present (e.g., "Gibraltar 16.12.14" -> "16.12.14")
+                # Codenames are single words before the version number
+                version_match = re.search(r"(\d+\.\d+\.\d+[a-zA-Z0-9()]*)", version)
+                if version_match:
+                    return version_match.group(1)
+                return version
 
         return None
 
@@ -694,12 +710,32 @@ class CiscoHandler(VendorHandler):
                 result["model"] = fallback_data.get("model")
                 result["software_version"] = fallback_data.get("software_rev")
 
+        # Clean up software version - strip codename if present (e.g., "Gibraltar 16.12.14" -> "16.12.14")
+        if result["software_version"]:
+            result["software_version"] = self._clean_version_string(result["software_version"])
+
         # Fallback: if no software version from Entity MIB, parse from sysDescr
         # This is common for ISR/ASR routers which don't populate entPhysicalSoftwareRev
         if not result["software_version"] and sys_descr:
             result["software_version"] = self._extract_version_from_sysdescr(sys_descr)
 
         return result
+
+    def _clean_version_string(self, version: str) -> str:
+        """
+        Clean up version string by removing codenames.
+        E.g., "Gibraltar 16.12.14" -> "16.12.14"
+             "Denali 16.3.5" -> "16.3.5"
+        """
+        if not version:
+            return version
+
+        # If version starts with a letter, it likely has a codename prefix
+        # Extract just the numeric version
+        version_match = re.search(r"(\d+\.\d+[\.\d()A-Za-z]*)", version)
+        if version_match:
+            return version_match.group(1)
+        return version
 
     def get_entity_mib_oids(self) -> dict[str, str]:
         """Return Entity MIB OID bases for walking."""

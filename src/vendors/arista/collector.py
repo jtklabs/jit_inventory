@@ -438,3 +438,21 @@ class AristaHandler(VendorHandler):
         inventory.modules.sort(key=lambda x: (x.contained_in or 0, x.parent_rel_pos or 0))
 
         return inventory
+
+    def parse_basic_info_from_entity_walk(
+        self, walk_results: dict[str, list[tuple[str, str]]], sys_descr: str | None = None
+    ) -> dict[str, Any]:
+        """
+        Arista-specific override to handle modular switches which may not
+        have entPhysicalSoftwareRev populated.
+
+        Falls back to parsing version from sysDescr if Entity MIB doesn't have it.
+        """
+        # Call parent implementation first
+        result = super().parse_basic_info_from_entity_walk(walk_results, sys_descr)
+
+        # If no software version from Entity MIB, parse from sysDescr
+        if not result.get("software_version") and sys_descr:
+            result["software_version"] = self._extract_version_from_sysdescr(sys_descr)
+
+        return result
