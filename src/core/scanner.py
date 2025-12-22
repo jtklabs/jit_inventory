@@ -114,23 +114,24 @@ class DeviceScanner:
                 handler = VendorRegistry.get_handler(device_info.vendor)
                 if handler:
                     try:
-                        # Walk Entity MIB for full inventory (500 rows for complete data)
+                        # Walk Entity MIB for full inventory (no limit - stacks can have 1000s of entries)
+                        # Each switch in a stack starts at 1000, 2000, 3000, etc.
                         entity_walk_results: dict[str, list[tuple[str, str]]] = {}
                         if hasattr(handler, "get_entity_mib_oids"):
                             entity_oids = handler.get_entity_mib_oids()
                             for name, base_oid in entity_oids.items():
                                 try:
-                                    results = await client.walk(base_oid, credential, max_rows=500)
+                                    results = await client.walk(base_oid, credential)
                                     entity_walk_results[name] = results
                                 except SNMPError:
                                     entity_walk_results[name] = []
 
-                        # Also walk basic OIDs for serial/model/version parsing
+                        # Also walk basic OIDs for serial/model/version parsing (unlimited)
                         basic_walk_results: dict[str, list[tuple[str, str]]] = {}
                         walk_oids = handler.get_entity_walk_oids()
                         for name, base_oid in walk_oids.items():
                             try:
-                                results = await client.walk(base_oid, credential, max_rows=50)
+                                results = await client.walk(base_oid, credential)
                                 basic_walk_results[name] = results
                             except SNMPError:
                                 basic_walk_results[name] = []
@@ -159,7 +160,7 @@ class DeviceScanner:
                             license_walk_results: dict[str, list[tuple[str, str]]] = {}
                             for name, base_oid in license_oids.items():
                                 try:
-                                    results = await client.walk(base_oid, credential, max_rows=200)
+                                    results = await client.walk(base_oid, credential)
                                     license_walk_results[name] = results
                                 except SNMPError:
                                     license_walk_results[name] = []

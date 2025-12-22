@@ -244,52 +244,184 @@ class SNMPClient:
         self,
         oid: str,
         credential: SNMPCredential,
-        max_rows: int = 100
+        max_rows: int | None = None
     ) -> list[tuple[str, Any]]:
         """
-        Walk an OID tree using GETBULK.
+        Walk an OID tree using GETBULK, with automatic fallback to GETNEXT.
+
+        Tries GETBULK first for performance. If the device doesn't support it
+        (returns error or empty results), automatically falls back to GETNEXT.
 
         Args:
             oid: The base OID to walk
             credential: SNMP credential (v2c or v3)
-            max_rows: Maximum number of rows to retrieve
+            max_rows: Maximum number of rows to retrieve (None = unlimited)
+
+        Returns:
+            List of (oid, value) tuples
+        """
+        try:
+            results = await self._bulk_walk(oid, credential, max_rows)
+            # If bulk walk returns empty but we expected data, try getnext
+            if not results:
+                return await self._getnext_walk(oid, credential, max_rows)
+            return results
+        except SNMPError as e:
+            # If GETBULK fails (some devices don't support it), fall back to GETNEXT
+            if "tooBig" in str(e) or "genErr" in str(e):
+                return await self._getnext_walk(oid, credential, max_rows)
+            raise
+
+    async def _bulk_walk(
+        self,
+        oid: str,
+        credential: SNMPCredential,
+        max_rows: int | None = None
+    ) -> list[tuple[str, Any]]:
+        """
+        Walk an OID tree using GETBULK requests.
+        Continues walking until the tree is exhausted or max_rows is reached.
+
+        Args:
+            oid: The base OID to walk
+            credential: SNMP credential (v2c or v3)
+            max_rows: Maximum number of rows to retrieve (None = unlimited)
 
         Returns:
             List of (oid, value) tuples
         """
         results = []
-        base_oid = oid
-        transport = await self._get_transport()
+        base_oid = oid.rstrip(".")
+        current_oid = oid
+        batch_size = 50  # Number of rows per GETBULK request
 
-        error_indication, error_status, error_index, var_binds = await bulk_cmd(
-            self._engine,
-            self._get_auth_data(credential),
-            transport,
-            ContextData(),
-            0,  # nonRepeaters
-            max_rows,  # maxRepetitions
-            ObjectType(ObjectIdentity(oid))
-        )
+        while True:
+            transport = await self._get_transport()
 
-        if error_indication:
-            if "timeout" in str(error_indication).lower():
-                raise SNMPTimeoutError(f"SNMP timeout for {self.host}: {error_indication}")
-            raise SNMPError(f"SNMP error for {self.host}: {error_indication}")
-
-        if error_status:
-            raise SNMPError(
-                f"SNMP error {error_status.prettyPrint()} at "
-                f"{error_index and var_binds[int(error_index) - 1][0] or '?'}"
+            error_indication, error_status, error_index, var_binds = await bulk_cmd(
+                self._engine,
+                self._get_auth_data(credential),
+                transport,
+                ContextData(),
+                0,  # nonRepeaters
+                batch_size,  # maxRepetitions
+                ObjectType(ObjectIdentity(current_oid))
             )
 
-        for var_bind in var_binds:
+            if error_indication:
+                if "timeout" in str(error_indication).lower():
+                    raise SNMPTimeoutError(f"SNMP timeout for {self.host}: {error_indication}")
+                raise SNMPError(f"SNMP error for {self.host}: {error_indication}")
+
+            if error_status:
+                raise SNMPError(
+                    f"SNMP error {error_status.prettyPrint()} at "
+                    f"{error_index and var_binds[int(error_index) - 1][0] or '?'}"
+                )
+
+            if not var_binds:
+                break
+
+            last_oid = None
+            for var_bind in var_binds:
+                oid_str = str(var_bind[0])
+                value = var_bind[1]
+
+                # Stop if we've walked past our base OID
+                if not oid_str.startswith(base_oid):
+                    return results
+
+                # Skip endOfMib or noSuch values
+                value_str = str(value) if value is not None else ""
+                if "noSuch" in value_str or "endOfMib" in value_str:
+                    return results
+
+                results.append((oid_str, value_str))
+                last_oid = oid_str
+
+                # Check if we've hit max_rows
+                if max_rows is not None and len(results) >= max_rows:
+                    return results
+
+            # If we got fewer results than batch_size, we're done
+            if len(var_binds) < batch_size:
+                break
+
+            # Continue from the last OID
+            if last_oid:
+                current_oid = last_oid
+            else:
+                break
+
+        return results
+
+    async def _getnext_walk(
+        self,
+        oid: str,
+        credential: SNMPCredential,
+        max_rows: int | None = None
+    ) -> list[tuple[str, Any]]:
+        """
+        Walk an OID tree using GETNEXT requests (slower but more compatible).
+
+        Args:
+            oid: The base OID to walk
+            credential: SNMP credential (v2c or v3)
+            max_rows: Maximum number of rows to retrieve (None = unlimited)
+
+        Returns:
+            List of (oid, value) tuples
+        """
+        from pysnmp.hlapi.v3arch.asyncio import next_cmd
+
+        results = []
+        base_oid = oid.rstrip(".")
+        current_oid = oid
+
+        while True:
+            transport = await self._get_transport()
+
+            error_indication, error_status, error_index, var_binds = await next_cmd(
+                self._engine,
+                self._get_auth_data(credential),
+                transport,
+                ContextData(),
+                ObjectType(ObjectIdentity(current_oid))
+            )
+
+            if error_indication:
+                if "timeout" in str(error_indication).lower():
+                    raise SNMPTimeoutError(f"SNMP timeout for {self.host}: {error_indication}")
+                raise SNMPError(f"SNMP error for {self.host}: {error_indication}")
+
+            if error_status:
+                raise SNMPError(
+                    f"SNMP error {error_status.prettyPrint()} at "
+                    f"{error_index and var_binds[int(error_index) - 1][0] or '?'}"
+                )
+
+            if not var_binds:
+                break
+
+            var_bind = var_binds[0]
             oid_str = str(var_bind[0])
             value = var_bind[1]
+
             # Stop if we've walked past our base OID
-            if not oid_str.startswith(base_oid.rstrip(".")):
+            if not oid_str.startswith(base_oid):
                 break
-            if value is not None and "noSuch" not in str(value) and "endOfMib" not in str(value):
-                results.append((oid_str, str(value)))
+
+            # Skip endOfMib or noSuch values
+            value_str = str(value) if value is not None else ""
+            if "noSuch" in value_str or "endOfMib" in value_str:
+                break
+
+            results.append((oid_str, value_str))
+            current_oid = oid_str
+
+            # Check if we've hit max_rows
+            if max_rows is not None and len(results) >= max_rows:
+                break
 
         return results
 
