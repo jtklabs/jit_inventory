@@ -112,30 +112,37 @@
 {% if inventory.stack_members and inventory.stack_members|length > 0 %}
 <div class="card mb-4">
     <div class="card-header">
-        <h5 class="mb-0"><i class="bi bi-stack"></i> Stack Members</h5>
+        <h5 class="mb-0"><i class="bi bi-stack"></i> Stack Members ({{ inventory.stack_members|length }})</h5>
     </div>
     <div class="card-body">
         <div class="table-responsive">
             <table class="table table-sm table-hover mb-0">
                 <thead>
                     <tr>
-                        <th>#</th>
-                        <th>Name</th>
+                        <th>Switch</th>
                         <th>Model</th>
                         <th>Serial Number</th>
                         <th>Hardware Rev</th>
                         <th>Software Rev</th>
+                        <th>Description</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for member in inventory.stack_members %}
                     <tr>
-                        <td>{{ loop.index }}</td>
-                        <td>{{ member.name or member.description or '-' }}</td>
+                        <td>
+                            {# Switch number is index / 1000 (1000=1, 2000=2, etc.) #}
+                            {% set switch_num = (member.index // 1000) %}
+                            <span class="badge bg-primary">{{ switch_num }}</span>
+                            {% if loop.first %}
+                                <small class="text-muted">(Master)</small>
+                            {% endif %}
+                        </td>
                         <td><strong>{{ member.model or '-' }}</strong></td>
                         <td><code>{{ member.serial or '-' }}</code></td>
                         <td>{{ member.hardware_rev or '-' }}</td>
                         <td>{{ member.software_rev or '-' }}</td>
+                        <td>{{ member.description[:30] if member.description else '-' }}{% if member.description and member.description|length > 30 %}...{% endif %}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -190,7 +197,9 @@
             <table class="table table-sm table-hover mb-0">
                 <thead>
                     <tr>
-                        <th>#</th>
+                        {% if inventory.is_stack %}
+                        <th>Switch</th>
+                        {% endif %}
                         <th>Name</th>
                         <th>Description</th>
                         <th>Model</th>
@@ -202,9 +211,19 @@
                 <tbody>
                     {% for module in inventory.modules %}
                     <tr>
-                        <td>{{ module.index }}</td>
+                        {% if inventory.is_stack %}
+                        <td>
+                            {# Calculate which switch this module belongs to based on contained_in #}
+                            {% set switch_num = ((module.contained_in or 0) // 1000) %}
+                            {% if switch_num > 0 %}
+                                <span class="badge bg-secondary">{{ switch_num }}</span>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        {% endif %}
                         <td>{{ module.name or '-' }}</td>
-                        <td>{{ module.description or '-' }}</td>
+                        <td>{{ module.description[:40] if module.description else '-' }}{% if module.description and module.description|length > 40 %}...{% endif %}</td>
                         <td><strong>{{ module.model or '-' }}</strong></td>
                         <td><code>{{ module.serial or '-' }}</code></td>
                         <td>{{ module.hardware_rev or '-' }}</td>
@@ -235,7 +254,9 @@
             <table class="table table-sm table-hover mb-0">
                 <thead>
                     <tr>
-                        <th>#</th>
+                        {% if inventory.is_stack %}
+                        <th>Switch</th>
+                        {% endif %}
                         <th>Name</th>
                         <th>Description</th>
                         <th>Model</th>
@@ -245,9 +266,18 @@
                 <tbody>
                     {% for psu in inventory.power_supplies %}
                     <tr>
-                        <td>{{ psu.index }}</td>
+                        {% if inventory.is_stack %}
+                        <td>
+                            {% set switch_num = ((psu.contained_in or 0) // 1000) %}
+                            {% if switch_num > 0 %}
+                                <span class="badge bg-secondary">{{ switch_num }}</span>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        {% endif %}
                         <td>{{ psu.name or '-' }}</td>
-                        <td>{{ psu.description or '-' }}</td>
+                        <td>{{ psu.description[:40] if psu.description else '-' }}{% if psu.description and psu.description|length > 40 %}...{% endif %}</td>
                         <td>{{ psu.model or '-' }}</td>
                         <td><code>{{ psu.serial or '-' }}</code></td>
                     </tr>
@@ -270,7 +300,9 @@
             <table class="table table-sm table-hover mb-0">
                 <thead>
                     <tr>
-                        <th>#</th>
+                        {% if inventory.is_stack %}
+                        <th>Switch</th>
+                        {% endif %}
                         <th>Name</th>
                         <th>Description</th>
                     </tr>
@@ -278,7 +310,16 @@
                 <tbody>
                     {% for fan in inventory.fans %}
                     <tr>
-                        <td>{{ fan.index }}</td>
+                        {% if inventory.is_stack %}
+                        <td>
+                            {% set switch_num = ((fan.contained_in or 0) // 1000) %}
+                            {% if switch_num > 0 %}
+                                <span class="badge bg-secondary">{{ switch_num }}</span>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        {% endif %}
                         <td>{{ fan.name or '-' }}</td>
                         <td>{{ fan.description or '-' }}</td>
                     </tr>
@@ -424,6 +465,7 @@
                         <tr>
                             <th>Index</th>
                             <th>Class</th>
+                            <th>Parent</th>
                             <th>Name</th>
                             <th>Description</th>
                             <th>Model</th>
@@ -436,8 +478,9 @@
                         <tr class="{% if comp.entity_class == 3 %}table-primary{% elif comp.entity_class == 11 %}table-info{% endif %}">
                             <td><strong>{{ comp.index }}</strong></td>
                             <td>{{ comp.class_name or comp.entity_class }}</td>
+                            <td>{{ comp.contained_in or '-' }}</td>
                             <td>{{ comp.name or '-' }}</td>
-                            <td>{{ comp.description[:50] if comp.description else '-' }}{% if comp.description and comp.description|length > 50 %}...{% endif %}</td>
+                            <td>{{ comp.description[:40] if comp.description else '-' }}{% if comp.description and comp.description|length > 40 %}...{% endif %}</td>
                             <td><code>{{ comp.model or '-' }}</code></td>
                             <td><code>{{ comp.serial or '-' }}</code></td>
                         </tr>
@@ -448,6 +491,7 @@
             </div>
             <small class="text-muted mt-2 d-block">
                 Showing chassis (class 3, blue), stack (class 11, cyan), containers (5), and modules (9) with serials.
+                Parent column shows contained_in index.
             </small>
         </div>
     </div>

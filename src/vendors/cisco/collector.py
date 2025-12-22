@@ -50,7 +50,9 @@ class EntityComponent:
         """Convert to dictionary for JSON serialization."""
         return {
             "index": self.index,
-            "class": self.class_name,
+            "entity_class": self.entity_class,
+            "class_name": self.class_name,
+            "contained_in": self.contained_in,
             "name": self.name,
             "description": self.description,
             "model": self.model_name,
@@ -610,34 +612,16 @@ class CiscoHandler(VendorHandler):
                     chassis_candidates.append(comp)
 
         # Second pass: determine actual stack members
-        # Filter out "stack container" placeholders which have generic names like "c36xx Stack"
-        # and typically are at low indices (1) while actual switches are at higher indices
+        # On Cisco stacks, index 1 is the stack container (e.g., "C9300-48P" but representing
+        # the whole stack, not an individual switch). Actual switches are at 1000, 2000, 3000, etc.
+        # We only want entries at index >= 1000 that have model + serial.
         for comp in chassis_candidates:
-            # Check if this looks like a stack container (placeholder) vs actual switch
-            name_lower = (comp.name or "").lower()
-            model_lower = (comp.model_name or "").lower()
+            # Only include high-index entries (1000+) as stack members
+            # Index 1 is always the stack container, even if it has the same model
+            if comp.index >= 1000 and comp.model_name and comp.serial_number:
+                inventory.stack_members.append(comp)
 
-            # Stack containers often have "stack" in the name/description but generic model
-            is_stack_container = (
-                "stack" in name_lower
-                and comp.index < 100
-                and not any(x in model_lower for x in ["ws-", "c9", "c38", "c93", "c36"])
-            )
-
-            # If it has a real switch model (WS-*, C9*00, etc.) and serial, it's a stack member
-            has_switch_model = any(
-                x in model_lower for x in ["ws-", "c9200", "c9300", "c9400", "c9500", "c3850", "c3650", "c9800"]
-            )
-
-            if comp.model_name and comp.serial_number:
-                # High-index entries are always real switches
-                if comp.index >= 1000:
-                    inventory.stack_members.append(comp)
-                # Low-index entries with actual switch models are real
-                elif has_switch_model and not is_stack_container:
-                    inventory.stack_members.append(comp)
-
-        # Sort stack members by index (lower = stack master typically)
+        # Sort stack members by index (lower = stack master typically, 1000 before 2000)
         inventory.stack_members.sort(key=lambda x: x.index)
 
         # Sort modules by position
