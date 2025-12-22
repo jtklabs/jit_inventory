@@ -278,25 +278,32 @@ class CiscoHandler(VendorHandler):
             result["device_type"] = "Firewall"
         elif "ios software" in sys_descr_lower or "cisco ios software" in sys_descr_lower:
             result["platform"] = "IOS"
+            # IOS can be switch or router - check for router indicators
+            if any(x in sys_descr_lower for x in ["router", "isr", "asr", "c1900", "c2900", "c3900", "c4000"]):
+                result["device_type"] = "Router"
 
         # Extract model - ordered by specificity
         model_patterns = [
             # Nexus patterns
             (r"Nexus\s*(\d{4})", "Nexus {}"),
             (r"(N\d{1,2}K-C\d+[A-Z0-9\-]*)", "{}"),
+            # ISR routers - check before Catalyst since ISR Software pattern is more specific
+            (r"(ISR\d{4}[A-Z0-9\-]*)", "{}"),
+            (r"ISR Software.*CISCO(\d{4}[A-Z0-9\-/]*)", "ISR {}"),
+            (r"cisco (ISR\d+[A-Z0-9\-/]*)", "{}"),
+            # Router with CISCO model number (ISR1900/2900/3900/4000 series)
+            (r"[Rr]outer.*CISCO(\d{4}[A-Z0-9\-/]*)", "ISR {}"),
+            (r"CISCO(\d{4}[A-Z0-9\-/]*).*[Rr]outer", "ISR {}"),
             # Catalyst 9000 series
             (r"(C9\d{3}[A-Z0-9\-]*)", "Catalyst {}"),
             # Catalyst with WS- prefix
             (r"(WS-C\d{4}[A-Z0-9\-]*)", "{}"),
-            # Catalyst from software name (e.g., "C3750 Software")
-            (r"(C\d{4}[A-Z]?)\s+Software", "Catalyst {}"),
+            # Catalyst from software name (e.g., "C3750 Software") - but not if Router in description
+            (r"(C\d{4}[A-Z]?)\s+Software(?!.*[Rr]outer)", "Catalyst {}"),
             # Generic Catalyst
             (r"Catalyst\s+(\d{4}[A-Z0-9\-]*)", "Catalyst {}"),
-            # ISR routers - various formats
-            (r"(ISR\d{4}[A-Z0-9\-]*)", "{}"),
+            # ISR fallback - CISCO with 4-digit number
             (r"CISCO(\d{4}[A-Z0-9\-/]*)\s", "ISR {}"),
-            (r"cisco (ISR\d+[A-Z0-9\-/]*)", "{}"),
-            (r"C(\d{4}[A-Z]?) Software.*Router", "ISR {}"),
             # ASR routers
             (r"(ASR\d{4}[A-Z0-9\-]*)", "{}"),
             (r"(ASR-\d{4}[A-Z0-9\-]*)", "{}"),
