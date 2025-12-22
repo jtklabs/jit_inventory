@@ -152,6 +152,7 @@ class DeviceInventory:
             "fans": [f.to_dict() for f in self.fans],
             "stack_members": [s.to_dict() for s in self.stack_members],
             "licenses": [lic.to_dict() for lic in self.licenses],
+            "all_components": [c.to_dict() for c in self.all_components],
         }
 
 
@@ -582,6 +583,9 @@ class CiscoHandler(VendorHandler):
         inventory = DeviceInventory()
         inventory.all_components = list(components.values())
 
+        # First pass: collect all chassis/stack candidates
+        chassis_candidates: list[EntityComponent] = []
+
         for comp in components.values():
             # Skip empty/placeholder entries
             if not comp.description and not comp.name and not comp.model_name:
@@ -590,11 +594,9 @@ class CiscoHandler(VendorHandler):
             if comp.entity_class == 3:  # Chassis
                 if inventory.chassis is None:
                     inventory.chassis = comp
-                # For stacks, each switch might show as chassis
-                # Skip low-index stack containers (e.g., index 1 = "c36xx Stack")
-                # Actual switches are at indices 1000+
-                if comp.model_name and comp.serial_number and comp.index >= 1000:
-                    inventory.stack_members.append(comp)
+                # Collect all chassis with model+serial as potential stack members
+                if comp.model_name and comp.serial_number:
+                    chassis_candidates.append(comp)
             elif comp.entity_class == 9:  # Module
                 if comp.serial_number or comp.model_name:
                     inventory.modules.append(comp)
@@ -603,9 +605,40 @@ class CiscoHandler(VendorHandler):
             elif comp.entity_class == 7:  # Fan
                 inventory.fans.append(comp)
             elif comp.entity_class == 11:  # Stack (explicit stack entity)
-                # Skip low-index stack containers
-                if comp.model_name and comp.serial_number and comp.index >= 1000:
+                # Collect all stack entities with model+serial
+                if comp.model_name and comp.serial_number:
+                    chassis_candidates.append(comp)
+
+        # Second pass: determine actual stack members
+        # Filter out "stack container" placeholders which have generic names like "c36xx Stack"
+        # and typically are at low indices (1) while actual switches are at higher indices
+        for comp in chassis_candidates:
+            # Check if this looks like a stack container (placeholder) vs actual switch
+            name_lower = (comp.name or "").lower()
+            model_lower = (comp.model_name or "").lower()
+
+            # Stack containers often have "stack" in the name/description but generic model
+            is_stack_container = (
+                "stack" in name_lower
+                and comp.index < 100
+                and not any(x in model_lower for x in ["ws-", "c9", "c38", "c93", "c36"])
+            )
+
+            # If it has a real switch model (WS-*, C9*00, etc.) and serial, it's a stack member
+            has_switch_model = any(
+                x in model_lower for x in ["ws-", "c9200", "c9300", "c9400", "c9500", "c3850", "c3650", "c9800"]
+            )
+
+            if comp.model_name and comp.serial_number:
+                # High-index entries are always real switches
+                if comp.index >= 1000:
                     inventory.stack_members.append(comp)
+                # Low-index entries with actual switch models are real
+                elif has_switch_model and not is_stack_container:
+                    inventory.stack_members.append(comp)
+
+        # Sort stack members by index (lower = stack master typically)
+        inventory.stack_members.sort(key=lambda x: x.index)
 
         # Sort modules by position
         inventory.modules.sort(key=lambda x: (x.contained_in or 0, x.parent_rel_pos or 0))
