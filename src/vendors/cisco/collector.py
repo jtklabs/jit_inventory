@@ -261,19 +261,22 @@ class CiscoHandler(VendorHandler):
 
         sys_descr_lower = sys_descr.lower()
 
-        # Detect platform
-        if "nx-os" in sys_descr_lower:
+        # Detect platform - order matters, check more specific patterns first
+        if "nx-os" in sys_descr_lower or "nxos" in sys_descr_lower:
             result["platform"] = "NX-OS"
             result["device_type"] = "switch"
-        elif "ios-xe" in sys_descr_lower or "ios xe" in sys_descr_lower:
+        elif "ios-xe" in sys_descr_lower or "ios xe" in sys_descr_lower or "iosxe" in sys_descr_lower:
             result["platform"] = "IOS-XE"
-        elif "adaptive security" in sys_descr_lower:
-            result["platform"] = "ASA"
-            result["device_type"] = "firewall"
-        elif "firepower" in sys_descr_lower or "ftd" in sys_descr_lower:
+        elif "firepower threat defense" in sys_descr_lower or "ftd" in sys_descr_lower:
             result["platform"] = "FTD"
             result["device_type"] = "firewall"
-        elif ", ios software," in sys_descr_lower or "ios software," in sys_descr_lower:
+        elif "firepower" in sys_descr_lower or "fxos" in sys_descr_lower:
+            result["platform"] = "FXOS"
+            result["device_type"] = "firewall"
+        elif "adaptive security" in sys_descr_lower or "asa software" in sys_descr_lower:
+            result["platform"] = "ASA"
+            result["device_type"] = "firewall"
+        elif "ios software" in sys_descr_lower or "cisco ios software" in sys_descr_lower:
             result["platform"] = "IOS"
 
         # Extract model - ordered by specificity
@@ -297,6 +300,10 @@ class CiscoHandler(VendorHandler):
             # ASA firewalls
             (r"(ASA\d{4}[A-Z0-9\-]*)", "{}"),
             (r"Cisco Adaptive Security Appliance.*?(55\d{2}[A-Z0-9\-]*)", "ASA {}"),
+            # Firepower
+            (r"(FPR-?\d{4}[A-Z0-9\-]*)", "{}"),
+            (r"Firepower\s+(\d{4}[A-Z0-9\-]*)", "Firepower {}"),
+            (r"(FMC\d{4}[A-Z0-9\-]*)", "{}"),
             # Wireless controllers
             (r"(AIR-CT\d{4}[A-Z0-9\-]*)", "{}"),
             (r"(C9800[A-Z0-9\-]*)", "{}"),
@@ -316,7 +323,7 @@ class CiscoHandler(VendorHandler):
                 result["device_type"] = "switch"
             elif any(x in model_lower for x in ["isr", "asr", "cisco2", "cisco3", "cisco4"]):
                 result["device_type"] = "router"
-            elif any(x in model_lower for x in ["asa", "firepower"]):
+            elif any(x in model_lower for x in ["asa", "firepower", "fpr", "fmc", "ftd"]):
                 result["device_type"] = "firewall"
             elif any(x in model_lower for x in ["air-ct", "c9800", "wlc"]):
                 result["device_type"] = "wireless_controller"

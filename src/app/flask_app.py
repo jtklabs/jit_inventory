@@ -456,6 +456,20 @@ def collect_device_inventory(device_id):
 
             inventory = handler.parse_entity_table(walk_results)
 
+            # Also parse basic info (serial, model, version) using the walk OIDs
+            basic_walk_oids = handler.get_entity_walk_oids()
+            basic_walk_results = {}
+            for oid_name, base_oid in basic_walk_oids.items():
+                try:
+                    results = await client.walk(base_oid, credential, max_rows=50)
+                    basic_walk_results[oid_name] = results
+                except Exception:
+                    basic_walk_results[oid_name] = []
+
+            basic_info = handler.parse_basic_info_from_entity_walk(
+                basic_walk_results, sys_descr=device_info.get("sys_description")
+            )
+
             # Walk License MIB if handler supports it
             if hasattr(handler, "get_license_mib_oids"):
                 license_oids = handler.get_license_mib_oids()
@@ -474,9 +488,9 @@ def collect_device_inventory(device_id):
                     licenses = handler.parse_license_table(license_walk_results)
                     inventory.licenses = licenses
 
-            return inventory
+            return inventory, basic_info
 
-        inventory = run_async(collect_inventory())
+        inventory, basic_info = run_async(collect_inventory())
         duration_ms = int((time.time() - start_time) * 1000)
 
         # Save inventory to device metadata and create scan history
@@ -491,6 +505,14 @@ def collect_device_inventory(device_id):
                 metadata["inventory"] = inventory.to_dict()
                 device.metadata_ = metadata
                 flag_modified(device, "metadata_")  # Ensure JSONB change is detected
+
+                # Update device fields from fresh SNMP data
+                if basic_info.get("serial_number"):
+                    device.serial_number = basic_info["serial_number"]
+                if basic_info.get("model"):
+                    device.model = basic_info["model"]
+                if basic_info.get("software_version"):
+                    device.software_version = basic_info["software_version"]
 
                 # Determine SNMP version from profile
                 from src.credentials.models import SNMPv2cProfile
