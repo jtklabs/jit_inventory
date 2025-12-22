@@ -90,7 +90,7 @@
             <div class="card-body" id="jobs-container">
                 {% if jobs %}
                     {% for job in jobs %}
-                        <div class="job-item mb-3 p-3 border rounded {% if job.is_running %}border-primary{% endif %}" id="job-{{ job.id }}">
+                        <div class="job-item mb-3 p-3 border rounded {% if job.status == 'running' %}border-primary{% endif %}" id="job-{{ job.id }}">
                             <div class="d-flex justify-content-between align-items-center mb-2">
                                 <div>
                                     <strong>
@@ -105,24 +105,24 @@
                                     <small class="text-muted ms-2">{{ job.id }}</small>
                                 </div>
                                 <div>
-                                    {% if job.status.value == 'running' %}
+                                    {% if job.status == 'running' %}
                                         <span class="badge bg-primary">
                                             <span class="spinner-border spinner-border-sm" role="status"></span>
                                             Running
                                         </span>
-                                    {% elif job.status.value == 'completed' %}
+                                    {% elif job.status == 'completed' %}
                                         <span class="badge bg-success">Completed</span>
-                                    {% elif job.status.value == 'failed' %}
+                                    {% elif job.status == 'failed' %}
                                         <span class="badge bg-danger">Failed</span>
                                     {% else %}
-                                        <span class="badge bg-secondary">{{ job.status.value }}</span>
+                                        <span class="badge bg-secondary">{{ job.status }}</span>
                                     {% endif %}
                                 </div>
                             </div>
 
-                            {% if job.is_running or job.status.value == 'completed' %}
+                            {% if job.status == 'running' or job.status == 'completed' %}
                                 <div class="progress mb-2" style="height: 20px;">
-                                    <div class="progress-bar {% if job.status.value == 'completed' %}bg-success{% endif %}"
+                                    <div class="progress-bar {% if job.status == 'completed' %}bg-success{% endif %}"
                                          role="progressbar"
                                          style="width: {{ job.progress_percent }}%"
                                          aria-valuenow="{{ job.progress_percent }}"

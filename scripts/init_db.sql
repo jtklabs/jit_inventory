@@ -47,7 +47,23 @@ CREATE TABLE IF NOT EXISTS scan_history (
     snmp_version VARCHAR(10)
 );
 
--- Batch scan jobs
+-- Scan jobs (background jobs for batch scan, refresh all, etc)
+CREATE TABLE IF NOT EXISTS scan_jobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_type VARCHAR(50) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    total_targets INTEGER NOT NULL DEFAULT 0,
+    completed_count INTEGER DEFAULT 0,
+    success_count INTEGER DEFAULT 0,
+    fail_count INTEGER DEFAULT 0,
+    error_message TEXT,
+    metadata JSONB
+);
+
+-- Batch scan jobs (legacy - use scan_jobs instead)
 CREATE TABLE IF NOT EXISTS batch_jobs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255),

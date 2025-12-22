@@ -93,8 +93,54 @@ class ScanHistory(Base):
         return f"<ScanHistory {self.ip_address} @ {self.started_at}>"
 
 
+class ScanJob(Base):
+    """Background scan job (batch scan, refresh all, etc)."""
+
+    __tablename__ = "scan_jobs"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
+    job_type: Mapped[str] = mapped_column(String(50), nullable=False)  # 'batch', 'refresh_all'
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    total_targets: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completed_count: Mapped[int] = mapped_column(Integer, default=0)
+    success_count: Mapped[int] = mapped_column(Integer, default=0)
+    fail_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB)
+
+    @property
+    def progress_percent(self) -> int:
+        if self.total_targets == 0:
+            return 0
+        return int((self.completed_count / self.total_targets) * 100)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "job_type": self.job_type,
+            "status": self.status,
+            "total_targets": self.total_targets,
+            "completed_count": self.completed_count,
+            "success_count": self.success_count,
+            "fail_count": self.fail_count,
+            "progress_percent": self.progress_percent,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "error": self.error_message,
+            "metadata": self.metadata_ or {},
+        }
+
+    def __repr__(self) -> str:
+        return f"<ScanJob {self.id} {self.job_type} ({self.status})>"
+
+
 class BatchJob(Base):
-    """Batch scanning job."""
+    """Batch scanning job (legacy - use ScanJob instead)."""
 
     __tablename__ = "batch_jobs"
 

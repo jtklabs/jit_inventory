@@ -1,148 +1,127 @@
 """
-Simple in-memory job tracker for background scan operations.
+Database-backed job tracker for background scan operations.
 """
-import threading
-from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
 from typing import Any
-import uuid
 
+from sqlalchemy import desc
+from sqlalchemy.orm import Session
 
-class JobStatus(str, Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-@dataclass
-class ScanJob:
-    """Represents a background scan job."""
-
-    id: str
-    job_type: str  # 'batch', 'refresh_all'
-    status: JobStatus = JobStatus.PENDING
-    total_targets: int = 0
-    completed_count: int = 0
-    success_count: int = 0
-    fail_count: int = 0
-    started_at: datetime | None = None
-    completed_at: datetime | None = None
-    error: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    @property
-    def progress_percent(self) -> int:
-        if self.total_targets == 0:
-            return 0
-        return int((self.completed_count / self.total_targets) * 100)
-
-    @property
-    def is_running(self) -> bool:
-        return self.status == JobStatus.RUNNING
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "job_type": self.job_type,
-            "status": self.status.value,
-            "total_targets": self.total_targets,
-            "completed_count": self.completed_count,
-            "success_count": self.success_count,
-            "fail_count": self.fail_count,
-            "progress_percent": self.progress_percent,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
-            "error": self.error,
-            "metadata": self.metadata,
-        }
+from src.db.connection import get_db_session
+from src.db.models import ScanJob
 
 
 class JobTracker:
-    """Thread-safe job tracker for background scan operations."""
-
-    _instance: "JobTracker | None" = None
-    _lock = threading.Lock()
-
-    def __new__(cls) -> "JobTracker":
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._jobs: dict[str, ScanJob] = {}
-                    cls._instance._job_lock = threading.Lock()
-        return cls._instance
+    """Database-backed job tracker for background scan operations."""
 
     def create_job(self, job_type: str, total_targets: int, metadata: dict[str, Any] | None = None) -> ScanJob:
         """Create a new scan job."""
-        job = ScanJob(
-            id=str(uuid.uuid4())[:8],
-            job_type=job_type,
-            total_targets=total_targets,
-            metadata=metadata or {},
-        )
-        with self._job_lock:
-            self._jobs[job.id] = job
-        return job
+        with get_db_session() as session:
+            job = ScanJob(
+                job_type=job_type,
+                status="pending",
+                total_targets=total_targets,
+                metadata_=metadata or {},
+            )
+            session.add(job)
+            session.commit()
+            session.refresh(job)
+            # Return a detached copy with the ID
+            return self._detach_job(job)
 
     def start_job(self, job_id: str) -> None:
         """Mark a job as running."""
-        with self._job_lock:
-            if job_id in self._jobs:
-                self._jobs[job_id].status = JobStatus.RUNNING
-                self._jobs[job_id].started_at = datetime.now()
+        with get_db_session() as session:
+            job = session.get(ScanJob, job_id)
+            if job:
+                job.status = "running"
+                job.started_at = datetime.utcnow()
+                session.commit()
 
     def update_progress(self, job_id: str, success: bool) -> None:
         """Update job progress after a single scan completes."""
-        with self._job_lock:
-            if job_id in self._jobs:
-                job = self._jobs[job_id]
+        with get_db_session() as session:
+            job = session.get(ScanJob, job_id)
+            if job:
                 job.completed_count += 1
                 if success:
                     job.success_count += 1
                 else:
                     job.fail_count += 1
+                session.commit()
 
     def complete_job(self, job_id: str, error: str | None = None) -> None:
         """Mark a job as completed."""
-        with self._job_lock:
-            if job_id in self._jobs:
-                job = self._jobs[job_id]
-                job.status = JobStatus.FAILED if error else JobStatus.COMPLETED
-                job.completed_at = datetime.now()
-                job.error = error
+        with get_db_session() as session:
+            job = session.get(ScanJob, job_id)
+            if job:
+                job.status = "failed" if error else "completed"
+                job.completed_at = datetime.utcnow()
+                job.error_message = error
+                session.commit()
 
     def get_job(self, job_id: str) -> ScanJob | None:
         """Get a job by ID."""
-        with self._job_lock:
-            return self._jobs.get(job_id)
+        with get_db_session() as session:
+            job = session.get(ScanJob, job_id)
+            if job:
+                return self._detach_job(job)
+            return None
 
     def get_active_jobs(self) -> list[ScanJob]:
         """Get all running jobs."""
-        with self._job_lock:
-            return [j for j in self._jobs.values() if j.status == JobStatus.RUNNING]
+        with get_db_session() as session:
+            jobs = session.query(ScanJob).filter(
+                ScanJob.status == "running"
+            ).order_by(desc(ScanJob.started_at)).all()
+            return [self._detach_job(j) for j in jobs]
 
     def get_recent_jobs(self, limit: int = 10) -> list[ScanJob]:
-        """Get recent jobs (running first, then by start time)."""
-        with self._job_lock:
-            jobs = list(self._jobs.values())
-            # Sort: running first, then by started_at descending
-            jobs.sort(key=lambda j: (
-                0 if j.status == JobStatus.RUNNING else 1,
-                -(j.started_at.timestamp() if j.started_at else 0)
-            ))
-            return jobs[:limit]
+        """Get recent jobs (running first, then by created_at)."""
+        with get_db_session() as session:
+            # Get running jobs first
+            running = session.query(ScanJob).filter(
+                ScanJob.status == "running"
+            ).order_by(desc(ScanJob.started_at)).all()
 
-    def cleanup_old_jobs(self, keep_count: int = 20) -> None:
-        """Remove old completed jobs, keeping the most recent ones."""
-        with self._job_lock:
-            completed = [j for j in self._jobs.values() if j.status in (JobStatus.COMPLETED, JobStatus.FAILED)]
-            completed.sort(key=lambda j: j.completed_at or datetime.min, reverse=True)
-            for job in completed[keep_count:]:
-                del self._jobs[job.id]
+            # Then get non-running jobs
+            remaining_limit = limit - len(running)
+            if remaining_limit > 0:
+                other = session.query(ScanJob).filter(
+                    ScanJob.status != "running"
+                ).order_by(desc(ScanJob.created_at)).limit(remaining_limit).all()
+            else:
+                other = []
+
+            return [self._detach_job(j) for j in running + other]
+
+    def _detach_job(self, job: ScanJob) -> ScanJob:
+        """Create a detached copy of a job that can be used outside the session."""
+        # Create a new instance with the same data
+        detached = ScanJob(
+            id=job.id,
+            job_type=job.job_type,
+            status=job.status,
+            total_targets=job.total_targets,
+            completed_count=job.completed_count,
+            success_count=job.success_count,
+            fail_count=job.fail_count,
+            error_message=job.error_message,
+            metadata_=job.metadata_,
+            created_at=job.created_at,
+            started_at=job.started_at,
+            completed_at=job.completed_at,
+        )
+        return detached
+
+
+# Singleton instance
+_job_tracker: JobTracker | None = None
 
 
 def get_job_tracker() -> JobTracker:
-    """Get the singleton job tracker instance."""
-    return JobTracker()
+    """Get the job tracker instance."""
+    global _job_tracker
+    if _job_tracker is None:
+        _job_tracker = JobTracker()
+    return _job_tracker
