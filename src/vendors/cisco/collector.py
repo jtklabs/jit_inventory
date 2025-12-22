@@ -687,6 +687,11 @@ class CiscoHandler(VendorHandler):
                 result["model"] = fallback_data.get("model")
                 result["software_version"] = fallback_data.get("software_rev")
 
+        # Fallback: if no software version from Entity MIB, parse from sysDescr
+        # This is common for ISR/ASR routers which don't populate entPhysicalSoftwareRev
+        if not result["software_version"] and sys_descr:
+            result["software_version"] = self._extract_version_from_sysdescr(sys_descr)
+
         return result
 
     def get_entity_mib_oids(self) -> dict[str, str]:
