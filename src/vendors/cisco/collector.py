@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.vendors.base import VendorHandler
+from src.vendors.base import VendorHandler, ENTITY_MIB_OIDS, ENTITY_CLASS_CHASSIS, ENTITY_CLASS_STACK
 
 
 @dataclass
@@ -574,6 +574,120 @@ class CiscoHandler(VendorHandler):
         inventory.modules.sort(key=lambda x: (x.contained_in or 0, x.parent_rel_pos or 0))
 
         return inventory
+
+    def parse_basic_info_from_entity_walk(
+        self, walk_results: dict[str, list[tuple[str, str]]], sys_descr: str | None = None
+    ) -> dict[str, Any]:
+        """
+        Cisco-specific override to handle stack switch indexing.
+
+        On Cisco stacks, index 1 is often a "stack container" (e.g., "c36xx Stack")
+        that has the same serial as the stack master but no specific model.
+        The actual switches are at indices 1000, 1001, 2000, 2001, etc.
+
+        We prefer indices >= 1000 for chassis/stack entities to get the actual
+        switch model and serial, not the stack container.
+        """
+        result: dict[str, Any] = {
+            "serial_number": None,
+            "model": None,
+            "software_version": None,
+        }
+
+        # Build a map of index -> data from walk results
+        entities: dict[int, dict[str, Any]] = {}
+
+        def get_index(oid: str, base_oid: str) -> int | None:
+            """Extract entity index from full OID."""
+            suffix = oid.replace(base_oid + ".", "")
+            try:
+                return int(suffix.split(".")[0])
+            except (ValueError, IndexError):
+                return None
+
+        # Parse entity classes first to identify chassis/stack members
+        class_results = walk_results.get("entPhysicalClass", [])
+        for full_oid, value in class_results:
+            idx = get_index(full_oid, ENTITY_MIB_OIDS["entPhysicalClass"])
+            if idx is not None:
+                try:
+                    entities[idx] = {"class": int(value)}
+                except ValueError:
+                    pass
+
+        # Parse serial numbers
+        serial_results = walk_results.get("entPhysicalSerialNum", [])
+        for full_oid, value in serial_results:
+            idx = get_index(full_oid, ENTITY_MIB_OIDS["entPhysicalSerialNum"])
+            if idx is not None and value and value.strip():
+                if idx not in entities:
+                    entities[idx] = {}
+                entities[idx]["serial"] = value.strip()
+
+        # Parse model names
+        model_results = walk_results.get("entPhysicalModelName", [])
+        for full_oid, value in model_results:
+            idx = get_index(full_oid, ENTITY_MIB_OIDS["entPhysicalModelName"])
+            if idx is not None and value and value.strip():
+                if idx not in entities:
+                    entities[idx] = {}
+                entities[idx]["model"] = value.strip()
+
+        # Parse software revisions
+        sw_results = walk_results.get("entPhysicalSoftwareRev", [])
+        for full_oid, value in sw_results:
+            idx = get_index(full_oid, ENTITY_MIB_OIDS["entPhysicalSoftwareRev"])
+            if idx is not None and value and value.strip():
+                if idx not in entities:
+                    entities[idx] = {}
+                entities[idx]["software_rev"] = value.strip()
+
+        # Find chassis or stack components (class 3 or 11) with serial numbers
+        # Separate into "high" indices (1000+, actual switches) and "low" indices (stack containers)
+        high_index_candidates = []
+        low_index_candidates = []
+
+        for idx, data in entities.items():
+            entity_class = data.get("class", 0)
+            if entity_class in (ENTITY_CLASS_CHASSIS, ENTITY_CLASS_STACK):
+                if data.get("serial"):
+                    if idx >= 1000:
+                        high_index_candidates.append((idx, data))
+                    else:
+                        low_index_candidates.append((idx, data))
+
+        # Prefer high-index entries (actual switches) over low-index (stack containers)
+        # Sort by index to get stack master (lowest in range)
+        high_index_candidates.sort(key=lambda x: x[0])
+        low_index_candidates.sort(key=lambda x: x[0])
+
+        if high_index_candidates:
+            # Use first high-index chassis/stack with a serial number (stack master)
+            _, chassis_data = high_index_candidates[0]
+            result["serial_number"] = chassis_data.get("serial")
+            result["model"] = chassis_data.get("model")
+            result["software_version"] = chassis_data.get("software_rev")
+        elif low_index_candidates:
+            # Fall back to low-index if no high-index found
+            _, chassis_data = low_index_candidates[0]
+            result["serial_number"] = chassis_data.get("serial")
+            result["model"] = chassis_data.get("model")
+            result["software_version"] = chassis_data.get("software_rev")
+        else:
+            # Fallback: find any entity with serial number (preferring high indices)
+            serial_candidates = [
+                (idx, data) for idx, data in entities.items() if data.get("serial")
+            ]
+            # Sort preferring high indices first, then by index within range
+            serial_candidates.sort(key=lambda x: (0 if x[0] >= 1000 else 1, x[0]))
+
+            if serial_candidates:
+                _, fallback_data = serial_candidates[0]
+                result["serial_number"] = fallback_data.get("serial")
+                result["model"] = fallback_data.get("model")
+                result["software_version"] = fallback_data.get("software_rev")
+
+        return result
 
     def get_entity_mib_oids(self) -> dict[str, str]:
         """Return Entity MIB OID bases for walking."""
