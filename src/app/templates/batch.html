@@ -79,113 +79,200 @@
     </div>
 
     <div class="col-md-8">
-        {% if summary %}
-            <!-- Summary Cards -->
-            <div class="row mb-3">
-                <div class="col-md-4">
-                    <div class="card stat-card primary">
-                        <div class="card-body py-2">
-                            <h6 class="text-muted mb-0">Total</h6>
-                            <h4 class="mb-0">{{ summary.total }}</h4>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="card stat-card success">
-                        <div class="card-body py-2">
-                            <h6 class="text-muted mb-0">Successful</h6>
-                            <h4 class="mb-0">{{ summary.success }}</h4>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="card stat-card danger">
-                        <div class="card-body py-2">
-                            <h6 class="text-muted mb-0">Failed</h6>
-                            <h4 class="mb-0">{{ summary.failed }}</h4>
-                        </div>
-                    </div>
-                </div>
+        <!-- Job Progress Section -->
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-hourglass-split"></i> Scan Jobs</h5>
+                <button class="btn btn-sm btn-outline-secondary" onclick="refreshJobs()">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh
+                </button>
             </div>
-
-            <!-- Results Tabs -->
-            <div class="card">
-                <div class="card-header">
-                    <ul class="nav nav-tabs card-header-tabs" role="tablist">
-                        <li class="nav-item">
-                            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#successful">
-                                Successful ({{ summary.success }})
-                            </button>
-                        </li>
-                        <li class="nav-item">
-                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#failed">
-                                Failed ({{ summary.failed }})
-                            </button>
-                        </li>
-                    </ul>
-                </div>
-                <div class="card-body">
-                    <div class="tab-content">
-                        <div class="tab-pane fade show active" id="successful">
-                            {% set successful = results | selectattr('success') | list %}
-                            {% if successful %}
-                                <div class="table-responsive">
-                                    <table class="table table-sm table-hover mb-0">
-                                        <thead>
-                                            <tr>
-                                                <th>IP Address</th>
-                                                <th>Hostname</th>
-                                                <th>Vendor</th>
-                                                <th>Model</th>
-                                                <th>Serial</th>
-                                                <th>Version</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {% for r in successful %}
-                                                {% if r.device_info %}
-                                                    <tr>
-                                                        <td><code>{{ r.device_info.ip_address }}</code></td>
-                                                        <td>{{ r.device_info.hostname or '-' }}</td>
-                                                        <td>{{ r.device_info.vendor|capitalize if r.device_info.vendor else '-' }}</td>
-                                                        <td>{{ r.device_info.model or '-' }}</td>
-                                                        <td><code>{{ r.device_info.serial_number or '-' }}</code></td>
-                                                        <td>{{ r.device_info.software_version or '-' }}</td>
-                                                    </tr>
-                                                {% endif %}
-                                            {% endfor %}
-                                        </tbody>
-                                    </table>
+            <div class="card-body" id="jobs-container">
+                {% if jobs %}
+                    {% for job in jobs %}
+                        <div class="job-item mb-3 p-3 border rounded {% if job.is_running %}border-primary{% endif %}" id="job-{{ job.id }}">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <div>
+                                    <strong>
+                                        {% if job.job_type == 'batch' %}
+                                            <i class="bi bi-list-check"></i> Batch Scan
+                                        {% elif job.job_type == 'refresh_all' %}
+                                            <i class="bi bi-arrow-clockwise"></i> Refresh All
+                                        {% else %}
+                                            {{ job.job_type }}
+                                        {% endif %}
+                                    </strong>
+                                    <small class="text-muted ms-2">{{ job.id }}</small>
                                 </div>
-                            {% else %}
-                                <p class="text-muted mb-0">No successful scans.</p>
+                                <div>
+                                    {% if job.status.value == 'running' %}
+                                        <span class="badge bg-primary">
+                                            <span class="spinner-border spinner-border-sm" role="status"></span>
+                                            Running
+                                        </span>
+                                    {% elif job.status.value == 'completed' %}
+                                        <span class="badge bg-success">Completed</span>
+                                    {% elif job.status.value == 'failed' %}
+                                        <span class="badge bg-danger">Failed</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ job.status.value }}</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+
+                            {% if job.is_running or job.status.value == 'completed' %}
+                                <div class="progress mb-2" style="height: 20px;">
+                                    <div class="progress-bar {% if job.status.value == 'completed' %}bg-success{% endif %}"
+                                         role="progressbar"
+                                         style="width: {{ job.progress_percent }}%"
+                                         aria-valuenow="{{ job.progress_percent }}"
+                                         aria-valuemin="0"
+                                         aria-valuemax="100">
+                                        {{ job.progress_percent }}%
+                                    </div>
+                                </div>
+                            {% endif %}
+
+                            <div class="d-flex justify-content-between text-muted small">
+                                <span>
+                                    <i class="bi bi-check-circle text-success"></i> {{ job.success_count }} success
+                                    <i class="bi bi-x-circle text-danger ms-2"></i> {{ job.fail_count }} failed
+                                </span>
+                                <span>{{ job.completed_count }} / {{ job.total_targets }} targets</span>
+                            </div>
+
+                            {% if job.error %}
+                                <div class="alert alert-danger mt-2 mb-0 py-1 small">{{ job.error }}</div>
+                            {% endif %}
+
+                            {% if job.started_at %}
+                                <div class="text-muted small mt-1">
+                                    Started: {{ job.started_at.strftime('%Y-%m-%d %H:%M:%S') }}
+                                    {% if job.completed_at %}
+                                        | Completed: {{ job.completed_at.strftime('%Y-%m-%d %H:%M:%S') }}
+                                    {% endif %}
+                                </div>
                             {% endif %}
                         </div>
-                        <div class="tab-pane fade" id="failed">
-                            {% set failed_results = results | rejectattr('success') | list %}
-                            {% if failed_results %}
-                                <ul class="list-group list-group-flush">
-                                    {% for r in failed_results %}
-                                        <li class="list-group-item text-danger">
-                                            <strong>{{ r.error }}</strong>
-                                        </li>
-                                    {% endfor %}
-                                </ul>
-                            {% else %}
-                                <p class="text-muted mb-0">No failed scans.</p>
-                            {% endif %}
-                        </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center py-4 text-muted" id="no-jobs-message">
+                        <i class="bi bi-inbox display-4"></i>
+                        <p class="mt-2 mb-0">No scan jobs yet. Start a batch scan to see progress here.</p>
                     </div>
-                </div>
+                {% endif %}
             </div>
-        {% else %}
-            <div class="card bg-light">
-                <div class="card-body text-center py-5">
-                    <i class="bi bi-list-check display-1 text-muted"></i>
-                    <p class="text-muted mt-3 mb-0">Enter IP addresses or CIDR ranges to scan multiple devices.</p>
-                </div>
-            </div>
-        {% endif %}
+        </div>
     </div>
 </div>
+
+<script>
+// Auto-refresh jobs every 2 seconds if there are running jobs
+let refreshInterval = null;
+
+function refreshJobs() {
+    fetch('/api/jobs')
+        .then(response => response.json())
+        .then(data => {
+            updateJobsDisplay(data.jobs);
+
+            // Check if any jobs are running
+            const hasRunning = data.jobs.some(j => j.status === 'running');
+            if (hasRunning && !refreshInterval) {
+                refreshInterval = setInterval(refreshJobs, 2000);
+            } else if (!hasRunning && refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        })
+        .catch(err => console.error('Failed to refresh jobs:', err));
+}
+
+function updateJobsDisplay(jobs) {
+    const container = document.getElementById('jobs-container');
+
+    if (jobs.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-4 text-muted" id="no-jobs-message">
+                <i class="bi bi-inbox display-4"></i>
+                <p class="mt-2 mb-0">No scan jobs yet. Start a batch scan to see progress here.</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '';
+    for (const job of jobs) {
+        const isRunning = job.status === 'running';
+        const isCompleted = job.status === 'completed';
+        const isFailed = job.status === 'failed';
+
+        let statusBadge = '';
+        if (isRunning) {
+            statusBadge = '<span class="badge bg-primary"><span class="spinner-border spinner-border-sm" role="status"></span> Running</span>';
+        } else if (isCompleted) {
+            statusBadge = '<span class="badge bg-success">Completed</span>';
+        } else if (isFailed) {
+            statusBadge = '<span class="badge bg-danger">Failed</span>';
+        } else {
+            statusBadge = `<span class="badge bg-secondary">${job.status}</span>`;
+        }
+
+        let jobIcon = job.job_type === 'batch' ? 'bi-list-check' : 'bi-arrow-clockwise';
+        let jobLabel = job.job_type === 'batch' ? 'Batch Scan' : (job.job_type === 'refresh_all' ? 'Refresh All' : job.job_type);
+
+        html += `
+            <div class="job-item mb-3 p-3 border rounded ${isRunning ? 'border-primary' : ''}" id="job-${job.id}">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                        <strong><i class="bi ${jobIcon}"></i> ${jobLabel}</strong>
+                        <small class="text-muted ms-2">${job.id}</small>
+                    </div>
+                    <div>${statusBadge}</div>
+                </div>
+
+                ${(isRunning || isCompleted) ? `
+                    <div class="progress mb-2" style="height: 20px;">
+                        <div class="progress-bar ${isCompleted ? 'bg-success' : ''}"
+                             role="progressbar"
+                             style="width: ${job.progress_percent}%"
+                             aria-valuenow="${job.progress_percent}"
+                             aria-valuemin="0"
+                             aria-valuemax="100">
+                            ${job.progress_percent}%
+                        </div>
+                    </div>
+                ` : ''}
+
+                <div class="d-flex justify-content-between text-muted small">
+                    <span>
+                        <i class="bi bi-check-circle text-success"></i> ${job.success_count} success
+                        <i class="bi bi-x-circle text-danger ms-2"></i> ${job.fail_count} failed
+                    </span>
+                    <span>${job.completed_count} / ${job.total_targets} targets</span>
+                </div>
+
+                ${job.error ? `<div class="alert alert-danger mt-2 mb-0 py-1 small">${job.error}</div>` : ''}
+
+                ${job.started_at ? `
+                    <div class="text-muted small mt-1">
+                        Started: ${new Date(job.started_at).toLocaleString()}
+                        ${job.completed_at ? `| Completed: ${new Date(job.completed_at).toLocaleString()}` : ''}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    container.innerHTML = html;
+}
+
+// Start auto-refresh on page load if there are running jobs
+document.addEventListener('DOMContentLoaded', function() {
+    const hasRunning = document.querySelector('.badge.bg-primary');
+    if (hasRunning) {
+        refreshInterval = setInterval(refreshJobs, 2000);
+    }
+});
+</script>
 {% endblock %}

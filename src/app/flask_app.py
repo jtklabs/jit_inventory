@@ -17,6 +17,7 @@ logging.basicConfig(
 
 from src.config.settings import get_settings
 from src.core.ip_utils import is_valid_ip, parse_targets, estimate_target_count
+from src.core.job_tracker import get_job_tracker
 from src.core.scanner import DeviceScanner
 from src.credentials import get_credential_provider
 from src.credentials.models import SNMPv2cProfile, SNMPv3Profile
@@ -166,11 +167,11 @@ def single_scan():
 @app.route("/batch", methods=["GET", "POST"])
 def batch_scan():
     """Batch scan page."""
+    import threading
+
     cred_provider = get_credential_provider()
     profiles = run_async(cred_provider.list_profiles())
-    results = []
     error = None
-    summary = None
 
     if request.method == "POST":
         targets_text = request.form.get("targets", "").strip()
@@ -191,42 +192,66 @@ def batch_scan():
                 if not profile:
                     error = f"Profile '{profile_name}' not found"
                 else:
-
-                    async def run_batch():
-                        scanner = DeviceScanner(timeout=timeout, retries=retries)
-                        credential = profile.to_snmp_credential()
-                        semaphore = asyncio.Semaphore(concurrency)
-                        batch_results = []
-
-                        async def scan_one(ip):
-                            async with semaphore:
-                                return await scanner.scan_device(
-                                    ip_address=ip,
-                                    credential=credential,
-                                    scan_type="batch",
-                                    credential_profile_name=profile_name,
-                                )
-
-                        tasks = [scan_one(ip) for ip in targets]
-                        batch_results = await asyncio.gather(*tasks)
-                        return batch_results
-
-                    results = run_async(run_batch())
-                    success_count = sum(1 for r in results if r.success)
-                    summary = {
-                        "total": len(results),
-                        "success": success_count,
-                        "failed": len(results) - success_count,
-                    }
-                    flash(
-                        f"Batch scan completed: {success_count}/{len(results)} successful",
-                        "success",
+                    # Create job tracker entry
+                    job_tracker = get_job_tracker()
+                    job = job_tracker.create_job(
+                        job_type="batch",
+                        total_targets=len(targets),
+                        metadata={"profile": profile_name, "targets_text": targets_text[:100]}
                     )
+
+                    def run_batch_background(job_id: str, targets: list, profile, concurrency: int, timeout: int, retries: int, profile_name: str):
+                        """Background task to run batch scan."""
+                        job_tracker = get_job_tracker()
+                        job_tracker.start_job(job_id)
+
+                        async def do_scan():
+                            scanner = DeviceScanner(timeout=timeout, retries=retries)
+                            credential = profile.to_snmp_credential()
+                            semaphore = asyncio.Semaphore(concurrency)
+
+                            async def scan_one(ip):
+                                async with semaphore:
+                                    result = await scanner.scan_device(
+                                        ip_address=ip,
+                                        credential=credential,
+                                        scan_type="batch",
+                                        credential_profile_name=profile_name,
+                                    )
+                                    job_tracker.update_progress(job_id, result.success)
+                                    return result
+
+                            await asyncio.gather(*[scan_one(ip) for ip in targets])
+
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            loop.run_until_complete(do_scan())
+                            job_tracker.complete_job(job_id)
+                        except Exception as e:
+                            job_tracker.complete_job(job_id, error=str(e))
+                        finally:
+                            loop.close()
+
+                    # Run in background thread
+                    thread = threading.Thread(
+                        target=run_batch_background,
+                        args=(job.id, targets, profile, concurrency, timeout, retries, profile_name)
+                    )
+                    thread.start()
+
+                    flash(f"Batch scan started for {len(targets)} targets. Check progress below.", "info")
+                    return redirect(url_for("batch_scan"))
+
             except Exception as e:
                 error = str(e)
 
+    # Get active and recent jobs for display
+    job_tracker = get_job_tracker()
+    jobs = job_tracker.get_recent_jobs(limit=10)
+
     return render_template(
-        "batch.html", profiles=profiles, results=results, error=error, summary=summary
+        "batch.html", profiles=profiles, error=error, jobs=jobs
     )
 
 
@@ -323,60 +348,66 @@ def refresh_all_devices():
     """Refresh all devices by re-scanning them with auto-discover."""
     import threading
 
-    def run_refresh():
+    # Get device count first
+    with get_db_session() as session:
+        device_repo = DeviceRepository(session)
+        devices = device_repo.get_all(limit=1000)
+        device_ips = [d.ip_address for d in devices]
+
+    if not device_ips:
+        flash("No devices to refresh", "warning")
+        return redirect(url_for("inventory"))
+
+    # Create job tracker entry
+    job_tracker = get_job_tracker()
+    job = job_tracker.create_job(
+        job_type="refresh_all",
+        total_targets=len(device_ips),
+        metadata={"description": "Refresh all devices"}
+    )
+
+    def run_refresh(job_id: str, device_ips: list):
         """Background task to refresh all devices."""
-        import asyncio
+        job_tracker = get_job_tracker()
+        job_tracker.start_job(job_id)
 
         async def refresh_devices():
             cred_provider = get_credential_provider()
             all_profiles = await cred_provider.get_all_profiles_ordered()
 
             if not all_profiles:
-                return 0, 0, "No credential profiles configured"
-
-            # Get all devices
-            with get_db_session() as session:
-                device_repo = DeviceRepository(session)
-                devices = device_repo.get_all(limit=1000)
-                device_ips = [d.ip_address for d in devices]
-
-            if not device_ips:
-                return 0, 0, "No devices to refresh"
+                raise Exception("No credential profiles configured")
 
             # Scan all devices with auto-discover
             scanner = DeviceScanner()
             semaphore = asyncio.Semaphore(10)  # Limit concurrency
-            success_count = 0
-            fail_count = 0
 
             async def scan_one(ip):
-                nonlocal success_count, fail_count
                 async with semaphore:
                     result = await scanner.scan_device_auto_discover(
                         ip_address=ip,
                         profiles=all_profiles,
                         scan_type="refresh",
                     )
-                    if result.success:
-                        success_count += 1
-                    else:
-                        fail_count += 1
+                    job_tracker.update_progress(job_id, result.success)
 
             await asyncio.gather(*[scan_one(ip) for ip in device_ips])
-            return success_count, fail_count, None
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            return loop.run_until_complete(refresh_devices())
+            loop.run_until_complete(refresh_devices())
+            job_tracker.complete_job(job_id)
+        except Exception as e:
+            job_tracker.complete_job(job_id, error=str(e))
         finally:
             loop.close()
 
     # Run in background thread
-    thread = threading.Thread(target=run_refresh)
+    thread = threading.Thread(target=run_refresh, args=(job.id, device_ips))
     thread.start()
 
-    flash("Refresh started! All devices will be rescanned in the background.", "info")
+    flash(f"Refresh started for {len(device_ips)} devices. Check Batch Scan page for progress.", "info")
     return redirect(url_for("inventory"))
 
 
@@ -761,6 +792,26 @@ def api_devices():
             )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ============== Job Status API ==============
+
+@app.route("/api/jobs")
+def api_get_jobs():
+    """Get recent scan jobs."""
+    job_tracker = get_job_tracker()
+    jobs = job_tracker.get_recent_jobs(limit=10)
+    return jsonify({"jobs": [j.to_dict() for j in jobs]})
+
+
+@app.route("/api/jobs/<job_id>")
+def api_get_job(job_id):
+    """Get a specific job status."""
+    job_tracker = get_job_tracker()
+    job = job_tracker.get_job(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify(job.to_dict())
 
 
 if __name__ == "__main__":
