@@ -264,18 +264,18 @@ class CiscoHandler(VendorHandler):
         # Detect platform - order matters, check more specific patterns first
         if "nx-os" in sys_descr_lower or "nxos" in sys_descr_lower:
             result["platform"] = "NX-OS"
-            result["device_type"] = "switch"
+            result["device_type"] = "Switch"
         elif "ios-xe" in sys_descr_lower or "ios xe" in sys_descr_lower or "iosxe" in sys_descr_lower:
             result["platform"] = "IOS-XE"
         elif "firepower threat defense" in sys_descr_lower or "ftd" in sys_descr_lower:
             result["platform"] = "FTD"
-            result["device_type"] = "firewall"
+            result["device_type"] = "Firewall"
         elif "firepower" in sys_descr_lower or "fxos" in sys_descr_lower:
             result["platform"] = "FXOS"
-            result["device_type"] = "firewall"
+            result["device_type"] = "Firewall"
         elif "adaptive security" in sys_descr_lower or "asa software" in sys_descr_lower:
             result["platform"] = "ASA"
-            result["device_type"] = "firewall"
+            result["device_type"] = "Firewall"
         elif "ios software" in sys_descr_lower or "cisco ios software" in sys_descr_lower:
             result["platform"] = "IOS"
 
@@ -320,13 +320,13 @@ class CiscoHandler(VendorHandler):
         if result["model"] and not result["device_type"]:
             model_lower = result["model"].lower()
             if any(x in model_lower for x in ["catalyst", "nexus", "ws-c", "n9k", "n7k", "n5k", "n3k"]):
-                result["device_type"] = "switch"
+                result["device_type"] = "Switch"
             elif any(x in model_lower for x in ["isr", "asr", "cisco2", "cisco3", "cisco4"]):
-                result["device_type"] = "router"
+                result["device_type"] = "Router"
             elif any(x in model_lower for x in ["asa", "firepower", "fpr", "fmc", "ftd"]):
-                result["device_type"] = "firewall"
+                result["device_type"] = "Firewall"
             elif any(x in model_lower for x in ["air-ct", "c9800", "wlc"]):
-                result["device_type"] = "wireless_controller"
+                result["device_type"] = "Wireless Controller"
 
         return result
 
@@ -342,19 +342,19 @@ class CiscoHandler(VendorHandler):
 
         # Common sysObjectID patterns - only used as fallback
         oid_patterns = {
-            r"\.9\.1\.(516|517|518|519)$": ("switch", "IOS", None),
-            r"\.9\.1\.(559|560)$": ("switch", "IOS", None),
-            r"\.9\.1\.(696|697|698|699)$": ("switch", "IOS", None),
-            r"\.9\.1\.(633|634|635|636)$": ("switch", "IOS", None),
-            r"\.9\.1\.(928|929|930|931)$": ("switch", "IOS", None),
-            r"\.9\.1\.(1208|1209|1210|1211|1212)$": ("switch", "IOS-XE", None),
-            r"\.9\.1\.(2066|2067|2068|2069|2070)$": ("switch", "IOS-XE", None),
-            r"\.9\.1\.(2489|2490|2491)$": ("switch", "IOS-XE", None),
-            r"\.9\.1\.(1041|1042|1043|1044|1045)$": ("router", "IOS", None),
-            r"\.9\.1\.(1577|1578|1579|1580)$": ("router", "IOS-XE", None),
-            r"\.9\.1\.(669|670|671|672|673|674|675)$": ("firewall", "ASA", None),
-            r"\.9\.1\.(1194|1195|1196|1197|1198|1199)$": ("firewall", "ASA", None),
-            r"\.9\.12\.3\.1\.3\.": ("switch", "NX-OS", None),
+            r"\.9\.1\.(516|517|518|519)$": ("Switch", "IOS", None),
+            r"\.9\.1\.(559|560)$": ("Switch", "IOS", None),
+            r"\.9\.1\.(696|697|698|699)$": ("Switch", "IOS", None),
+            r"\.9\.1\.(633|634|635|636)$": ("Switch", "IOS", None),
+            r"\.9\.1\.(928|929|930|931)$": ("Switch", "IOS", None),
+            r"\.9\.1\.(1208|1209|1210|1211|1212)$": ("Switch", "IOS-XE", None),
+            r"\.9\.1\.(2066|2067|2068|2069|2070)$": ("Switch", "IOS-XE", None),
+            r"\.9\.1\.(2489|2490|2491)$": ("Switch", "IOS-XE", None),
+            r"\.9\.1\.(1041|1042|1043|1044|1045)$": ("Router", "IOS", None),
+            r"\.9\.1\.(1577|1578|1579|1580)$": ("Router", "IOS-XE", None),
+            r"\.9\.1\.(669|670|671|672|673|674|675)$": ("Firewall", "ASA", None),
+            r"\.9\.1\.(1194|1195|1196|1197|1198|1199)$": ("Firewall", "ASA", None),
+            r"\.9\.12\.3\.1\.3\.": ("Switch", "NX-OS", None),
         }
 
         for pattern, (device_type, platform, model) in oid_patterns.items():
