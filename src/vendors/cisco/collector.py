@@ -267,6 +267,10 @@ class CiscoHandler(VendorHandler):
             result["device_type"] = "Switch"
         elif "ios-xe" in sys_descr_lower or "ios xe" in sys_descr_lower or "iosxe" in sys_descr_lower:
             result["platform"] = "IOS-XE"
+        elif "isr software" in sys_descr_lower:
+            # ISR Software with Linux kernel = IOS-XE on ISR routers
+            result["platform"] = "IOS-XE"
+            result["device_type"] = "Router"
         elif "firepower threat defense" in sys_descr_lower or "ftd" in sys_descr_lower:
             result["platform"] = "FTD"
             result["device_type"] = "Firewall"
