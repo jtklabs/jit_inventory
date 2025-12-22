@@ -21,4 +21,6 @@ ENV PYTHONPATH=/app
 EXPOSE 5000
 
 # Run with gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "4", "src.app.flask_app:app"]
+# Using 1 worker with threads to share in-memory job tracker state
+# For multi-worker, would need Redis or database-backed job storage
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "8", "src.app.flask_app:app"]

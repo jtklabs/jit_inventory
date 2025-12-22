@@ -19,6 +19,9 @@
     <div class="alert alert-danger">{{ error }}</div>
 {% endif %}
 
+<!-- Running Jobs Indicator -->
+<div id="running-jobs-container"></div>
+
 <!-- Filters -->
 <div class="card mb-4">
     <div class="card-body">
@@ -117,4 +120,70 @@
         {% endif %}
     </div>
 </div>
+
+<script>
+// Check for running jobs and display progress
+let jobRefreshInterval = null;
+
+function checkRunningJobs() {
+    fetch('/api/jobs')
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('running-jobs-container');
+            const runningJobs = data.jobs.filter(j => j.status === 'running');
+
+            if (runningJobs.length > 0) {
+                let html = '';
+                for (const job of runningJobs) {
+                    const jobLabel = job.job_type === 'refresh_all' ? 'Refresh All' : 'Batch Scan';
+                    html += `
+                        <div class="alert alert-info mb-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <strong>
+                                    <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                                    ${jobLabel} in progress...
+                                </strong>
+                                <span>${job.completed_count} / ${job.total_targets} devices</span>
+                            </div>
+                            <div class="progress" style="height: 20px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                     role="progressbar"
+                                     style="width: ${job.progress_percent}%"
+                                     aria-valuenow="${job.progress_percent}"
+                                     aria-valuemin="0"
+                                     aria-valuemax="100">
+                                    ${job.progress_percent}%
+                                </div>
+                            </div>
+                            <small class="text-muted mt-1 d-block">
+                                <i class="bi bi-check-circle text-success"></i> ${job.success_count} success
+                                <i class="bi bi-x-circle text-danger ms-2"></i> ${job.fail_count} failed
+                            </small>
+                        </div>
+                    `;
+                }
+                container.innerHTML = html;
+
+                // Keep refreshing while jobs are running
+                if (!jobRefreshInterval) {
+                    jobRefreshInterval = setInterval(checkRunningJobs, 2000);
+                }
+            } else {
+                container.innerHTML = '';
+                if (jobRefreshInterval) {
+                    clearInterval(jobRefreshInterval);
+                    jobRefreshInterval = null;
+                    // Reload page to show updated data
+                    if (data.jobs.length > 0 && data.jobs[0].status === 'completed') {
+                        location.reload();
+                    }
+                }
+            }
+        })
+        .catch(err => console.error('Failed to check jobs:', err));
+}
+
+// Check immediately on page load
+document.addEventListener('DOMContentLoaded', checkRunningJobs);
+</script>
 {% endblock %}
