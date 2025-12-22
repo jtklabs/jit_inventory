@@ -258,7 +258,6 @@
                         <th>Switch</th>
                         {% endif %}
                         <th>Name</th>
-                        <th>Description</th>
                         <th>Model</th>
                         <th>Serial Number</th>
                     </tr>
@@ -276,8 +275,7 @@
                             {% endif %}
                         </td>
                         {% endif %}
-                        <td>{{ psu.name or '-' }}</td>
-                        <td>{{ psu.description[:40] if psu.description else '-' }}{% if psu.description and psu.description|length > 40 %}...{% endif %}</td>
+                        <td>{{ psu.name or psu.description or psu.model or '-' }}</td>
                         <td>{{ psu.model or '-' }}</td>
                         <td><code>{{ psu.serial or '-' }}</code></td>
                     </tr>
@@ -474,8 +472,8 @@
                     </thead>
                     <tbody>
                         {% for comp in inventory.all_components|sort(attribute='index') %}
-                        {% if comp.entity_class in [3, 5, 9, 11] or comp.serial %}
-                        <tr class="{% if comp.entity_class == 3 %}table-primary{% elif comp.entity_class == 11 %}table-info{% endif %}">
+                        {% if comp.entity_class in [3, 5, 6, 7, 9, 11] or comp.serial %}
+                        <tr class="{% if comp.entity_class == 3 %}table-primary{% elif comp.entity_class == 11 %}table-info{% elif comp.entity_class == 6 %}table-warning{% endif %}">
                             <td><strong>{{ comp.index }}</strong></td>
                             <td>{{ comp.class_name or comp.entity_class }}</td>
                             <td>{{ comp.contained_in or '-' }}</td>
@@ -490,7 +488,7 @@
                 </table>
             </div>
             <small class="text-muted mt-2 d-block">
-                Showing chassis (class 3, blue), stack (class 11, cyan), containers (5), and modules (9) with serials.
+                Showing chassis (3, blue), stack (11, cyan), PSU (6, yellow), fans (7), containers (5), modules (9).
                 Parent column shows contained_in index.
             </small>
         </div>
