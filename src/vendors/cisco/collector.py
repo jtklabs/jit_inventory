@@ -580,7 +580,9 @@ class CiscoHandler(VendorHandler):
                 if inventory.chassis is None:
                     inventory.chassis = comp
                 # For stacks, each switch might show as chassis
-                if comp.model_name and comp.serial_number:
+                # Skip low-index stack containers (e.g., index 1 = "c36xx Stack")
+                # Actual switches are at indices 1000+
+                if comp.model_name and comp.serial_number and comp.index >= 1000:
                     inventory.stack_members.append(comp)
             elif comp.entity_class == 9:  # Module
                 if comp.serial_number or comp.model_name:
@@ -590,7 +592,8 @@ class CiscoHandler(VendorHandler):
             elif comp.entity_class == 7:  # Fan
                 inventory.fans.append(comp)
             elif comp.entity_class == 11:  # Stack (explicit stack entity)
-                if comp.model_name and comp.serial_number:
+                # Skip low-index stack containers
+                if comp.model_name and comp.serial_number and comp.index >= 1000:
                     inventory.stack_members.append(comp)
 
         # Sort modules by position
