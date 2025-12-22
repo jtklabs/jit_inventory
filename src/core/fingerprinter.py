@@ -20,6 +20,13 @@ class FingerprintResult:
     raw_sys_object_id: str | None = None
 
 
+def strip_domain(hostname: str | None) -> str | None:
+    """Strip domain name from FQDN, returning just the hostname."""
+    if not hostname:
+        return hostname
+    return hostname.split(".")[0]
+
+
 class DeviceFingerprinter:
     """
     Fingerprints network devices using SNMP sysObjectID and sysDescr.
@@ -76,7 +83,7 @@ class DeviceFingerprinter:
                     success=True,
                     device_info=DeviceInfo(
                         ip_address=self.snmp_client.host,
-                        hostname=sys_name,
+                        hostname=strip_domain(sys_name),
                         vendor="unknown",
                         sys_object_id=sys_object_id,
                         sys_description=sys_descr,
@@ -92,7 +99,7 @@ class DeviceFingerprinter:
                 success=True,
                 device_info=DeviceInfo(
                     ip_address=self.snmp_client.host,
-                    hostname=sys_name,
+                    hostname=strip_domain(sys_name),
                     vendor=handler.vendor_name,
                     device_type=device_type_info.get("device_type"),
                     platform=device_type_info.get("platform"),

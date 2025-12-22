@@ -5,7 +5,14 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-box-seam"></i> Device Inventory</h2>
-    <span class="badge bg-primary">{{ devices|length }} devices</span>
+    <div>
+        <form method="POST" action="{{ url_for('refresh_all_devices') }}" class="d-inline">
+            <button type="submit" class="btn btn-outline-primary me-2" onclick="this.disabled=true; this.innerHTML='<span class=\'spinner-border spinner-border-sm\'></span> Refreshing...'; this.form.submit();">
+                <i class="bi bi-arrow-clockwise"></i> Refresh All
+            </button>
+        </form>
+        <span class="badge bg-primary">{{ devices|length }} devices</span>
+    </div>
 </div>
 
 {% if error %}

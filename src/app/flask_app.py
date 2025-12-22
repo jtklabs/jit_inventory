@@ -325,6 +325,68 @@ def device_detail(device_id):
     )
 
 
+@app.route("/inventory/refresh-all", methods=["POST"])
+def refresh_all_devices():
+    """Refresh all devices by re-scanning them with auto-discover."""
+    import threading
+
+    def run_refresh():
+        """Background task to refresh all devices."""
+        import asyncio
+
+        async def refresh_devices():
+            cred_provider = get_credential_provider()
+            all_profiles = await cred_provider.get_all_profiles_ordered()
+
+            if not all_profiles:
+                return 0, 0, "No credential profiles configured"
+
+            # Get all devices
+            with get_db_session() as session:
+                device_repo = DeviceRepository(session)
+                devices = device_repo.get_all(limit=1000)
+                device_ips = [d.ip_address for d in devices]
+
+            if not device_ips:
+                return 0, 0, "No devices to refresh"
+
+            # Scan all devices with auto-discover
+            scanner = DeviceScanner()
+            semaphore = asyncio.Semaphore(10)  # Limit concurrency
+            success_count = 0
+            fail_count = 0
+
+            async def scan_one(ip):
+                nonlocal success_count, fail_count
+                async with semaphore:
+                    result = await scanner.scan_device_auto_discover(
+                        ip_address=ip,
+                        profiles=all_profiles,
+                        scan_type="refresh",
+                    )
+                    if result.success:
+                        success_count += 1
+                    else:
+                        fail_count += 1
+
+            await asyncio.gather(*[scan_one(ip) for ip in device_ips])
+            return success_count, fail_count, None
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(refresh_devices())
+        finally:
+            loop.close()
+
+    # Run in background thread
+    thread = threading.Thread(target=run_refresh)
+    thread.start()
+
+    flash("Refresh started! All devices will be rescanned in the background.", "info")
+    return redirect(url_for("inventory"))
+
+
 @app.route("/inventory/<device_id>/recheck-credentials", methods=["POST"])
 def recheck_device_credentials(device_id):
     """Re-check credentials for a device by trying all profiles in order."""
