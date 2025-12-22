@@ -232,7 +232,7 @@ class CiscoHandler(VendorHandler):
             "model": None,
         }
 
-        # First, try to extract model from sysDescr - this is most accurate
+        # First, try to extract info from sysDescr - this is most accurate
         if sys_descr:
             model_info = self._parse_model_from_sysdescr(sys_descr)
             if model_info.get("model"):
@@ -242,8 +242,8 @@ class CiscoHandler(VendorHandler):
             if model_info.get("device_type"):
                 result["device_type"] = model_info["device_type"]
 
-        # If we got a model from sysDescr, we're done
-        if result["model"]:
+        # If we got useful info from sysDescr (model, or platform/type), we're done
+        if result["model"] or (result["platform"] and result["device_type"]):
             return result
 
         # Fallback: use sysObjectID patterns (less accurate but works for unknown devices)
