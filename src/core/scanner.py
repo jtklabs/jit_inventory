@@ -112,7 +112,10 @@ class DeviceScanner:
             # This does a full inventory collection (modules, stack members, licenses)
             # in addition to basic info (serial, model, version)
             if device_info.vendor and device_info.vendor != "unknown":
-                handler = VendorRegistry.get_handler(device_info.vendor)
+                # Use detect_vendor with sysObjectID to get the correct handler
+                # (get_handler by vendor name can return wrong handler when multiple
+                # handlers share the same vendor name, e.g., Aruba WLC vs ClearPass)
+                handler = VendorRegistry.detect_vendor(device_info.sys_object_id or "")
                 if handler:
                     try:
                         # Walk Entity MIB for full inventory (no limit - stacks can have 1000s of entries)
