@@ -167,6 +167,8 @@ class ClearPassHandler(VendorHandler):
         - "ClearPass Policy Manager"
         - "Aruba ClearPass Policy Manager Virtual Appliance"
         - "Linux clearpass 4.14.0-1-amd64..."
+        - "...Model: C2000 (R220)..."
+        - "...Model: C3000..."
         """
         result: dict[str, str | None] = {
             "model": None,
@@ -176,6 +178,8 @@ class ClearPassHandler(VendorHandler):
 
         # Try to extract specific model patterns first
         model_patterns = [
+            # "Model: C2000 (R220)" or "Model: C3000" - extract C2000/C3000/etc
+            r"Model:\s*(C\d+)",
             r"(CP-HW-\w+)",
             r"(CP-VA-\w+)",
             r"ClearPass\s+(\d+[K]?)",
@@ -185,7 +189,7 @@ class ClearPassHandler(VendorHandler):
             match = re.search(pattern, sys_descr, re.I)
             if match:
                 model = match.group(1).upper()
-                result["model"] = self.MODEL_MAP.get(model, model)
+                result["model"] = self.MODEL_MAP.get(model, f"ClearPass {model}")
                 return result
 
         # Fall back to generic detection
