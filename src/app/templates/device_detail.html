@@ -391,6 +391,65 @@
     </div>
 </div>
 {% endif %}
+
+<!-- Access Points (Wireless Controllers) -->
+{% if inventory.access_points and inventory.access_points|length > 0 %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">
+            <i class="bi bi-wifi"></i> Access Points ({{ inventory.access_points|length }})
+            {% if inventory.ap_up_count is defined %}
+                <span class="badge bg-success ms-2">{{ inventory.ap_up_count }} Up</span>
+                {% if inventory.access_points|length - inventory.ap_up_count > 0 %}
+                    <span class="badge bg-danger ms-1">{{ inventory.access_points|length - inventory.ap_up_count }} Down</span>
+                {% endif %}
+            {% endif %}
+        </h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>IP Address</th>
+                        <th>MAC Address</th>
+                        <th>Model</th>
+                        <th>Serial Number</th>
+                        <th>Status</th>
+                        <th>Group</th>
+                        <th>Location</th>
+                        <th>Version</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for ap in inventory.access_points %}
+                    <tr>
+                        <td><strong>{{ ap.name or '-' }}</strong></td>
+                        <td><code>{{ ap.ip_address or '-' }}</code></td>
+                        <td><code>{{ ap.mac_address or '-' }}</code></td>
+                        <td>{{ ap.model or '-' }}</td>
+                        <td><code>{{ ap.serial_number or '-' }}</code></td>
+                        <td>
+                            {% if ap.status == 'up' %}
+                                <span class="badge bg-success">Up</span>
+                            {% elif ap.status == 'down' %}
+                                <span class="badge bg-danger">Down</span>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ ap.status or 'Unknown' }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ ap.group_name or '-' }}</td>
+                        <td>{{ ap.location or '-' }}</td>
+                        <td><small>{{ ap.software_version or '-' }}</small></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
 {% endif %}
 
 <!-- sysDescr -->

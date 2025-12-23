@@ -5,6 +5,7 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -136,12 +137,43 @@ class DeviceScanner:
                             except SNMPError:
                                 basic_walk_results[name] = []
 
-                        # Parse basic info (serial, model, version)
+                        # Parse basic info (serial, model, version) from Entity MIB walk
                         parsed = handler.parse_basic_info_from_entity_walk(
                             basic_walk_results, sys_descr=device_info.sys_description
                         )
 
-                        # Update device info - prefer Entity MIB data over sysDescr
+                        # Also try vendor-specific scalar OIDs (e.g., WLSX-SYSTEMEXT-MIB for Aruba)
+                        # These are GET requests, not walks
+                        scalar_oids = handler.get_collection_oids()
+                        if scalar_oids:
+                            try:
+                                scalar_values = await client.get_bulk(
+                                    list(scalar_oids.values()), credential
+                                )
+                                # Map OID values back to field names
+                                scalar_data: dict[str, Any] = {}
+                                for name, oid in scalar_oids.items():
+                                    for resp_oid, value in scalar_values.items():
+                                        if oid in resp_oid or resp_oid.endswith(oid.split(".")[-1]):
+                                            scalar_data[name] = value
+                                            break
+
+                                # Parse vendor-specific data
+                                if scalar_data:
+                                    vendor_parsed = handler.parse_collected_data(
+                                        scalar_data, sys_descr=device_info.sys_description
+                                    )
+                                    # Vendor-specific data takes priority over Entity MIB
+                                    if vendor_parsed.get("serial_number"):
+                                        parsed["serial_number"] = vendor_parsed["serial_number"]
+                                    if vendor_parsed.get("software_version"):
+                                        parsed["software_version"] = vendor_parsed["software_version"]
+                                    if vendor_parsed.get("model"):
+                                        parsed["model"] = vendor_parsed["model"]
+                            except SNMPError:
+                                pass  # Fall back to Entity MIB data
+
+                        # Update device info - prefer collected data over sysDescr
                         if parsed.get("serial_number"):
                             device_info.serial_number = parsed["serial_number"]
                         if parsed.get("software_version"):
