@@ -169,6 +169,21 @@ class DeviceScanner:
                                 licenses = handler.parse_license_table(license_walk_results)
                                 inventory.licenses = licenses
 
+                        # Walk and parse AP table for wireless controllers (Aruba)
+                        if hasattr(handler, "get_ap_table_oids") and hasattr(handler, "parse_ap_table"):
+                            ap_oids = handler.get_ap_table_oids()
+                            ap_walk_results: dict[str, list[tuple[str, str]]] = {}
+                            for name, base_oid in ap_oids.items():
+                                try:
+                                    results = await client.walk(base_oid, credential)
+                                    ap_walk_results[name] = results
+                                except SNMPError:
+                                    ap_walk_results[name] = []
+
+                            if any(ap_walk_results.values()) and inventory:
+                                access_points = handler.parse_ap_table(ap_walk_results)
+                                inventory.access_points = access_points
+
                         # Store inventory in raw_data for saving to metadata
                         if inventory:
                             device_info.raw_data = {"inventory": inventory.to_dict()}

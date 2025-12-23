@@ -71,10 +71,14 @@ class VendorRegistry:
 
         cls.register(PaloAltoHandler)
 
+        # Import and register Aruba handler
+        from src.vendors.aruba.collector import ArubaHandler
+
+        cls.register(ArubaHandler)
+
         # Future vendor handlers will be registered here:
         # from src.vendors.juniper.collector import JuniperHandler
         # from src.vendors.fortinet.collector import FortinetHandler
         # from src.vendors.f5.collector import F5Handler
-        # from src.vendors.aruba.collector import ArubaHandler
         # from src.vendors.infoblox.collector import InfobloxHandler
         # from src.vendors.checkpoint.collector import CheckpointHandler
