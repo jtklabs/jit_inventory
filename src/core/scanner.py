@@ -154,7 +154,10 @@ class DeviceScanner:
                                 scalar_data: dict[str, Any] = {}
                                 for name, oid in scalar_oids.items():
                                     for resp_oid, value in scalar_values.items():
-                                        if oid in resp_oid or resp_oid.endswith(oid.split(".")[-1]):
+                                        # Normalize OIDs for comparison (strip leading dot)
+                                        norm_oid = oid.lstrip(".")
+                                        norm_resp = resp_oid.lstrip(".")
+                                        if norm_oid == norm_resp or norm_resp.endswith("." + norm_oid):
                                             scalar_data[name] = value
                                             break
 

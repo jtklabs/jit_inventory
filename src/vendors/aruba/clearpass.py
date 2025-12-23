@@ -178,18 +178,23 @@ class ClearPassHandler(VendorHandler):
 
         # Try to extract specific model patterns first
         model_patterns = [
-            # "Model: C2000 (R220)" or "Model: C3000" - extract C2000/C3000/etc
-            r"Model:\s*(C\d+)",
-            r"(CP-HW-\w+)",
-            r"(CP-VA-\w+)",
-            r"ClearPass\s+(\d+[K]?)",
+            # "Model: C2000 (R220)" or "Model: C3000" - extract just C2000/C3000/etc
+            (r"Model:\s*(C\d+)", "ClearPass {}"),
+            (r"(CP-HW-\w+)", None),
+            (r"(CP-VA-\w+)", None),
+            (r"ClearPass\s+(\d+[K]?)", "ClearPass {}"),
         ]
 
-        for pattern in model_patterns:
+        for pattern, fmt in model_patterns:
             match = re.search(pattern, sys_descr, re.I)
             if match:
                 model = match.group(1).upper()
-                result["model"] = self.MODEL_MAP.get(model, f"ClearPass {model}")
+                if model in self.MODEL_MAP:
+                    result["model"] = self.MODEL_MAP[model]
+                elif fmt:
+                    result["model"] = fmt.format(model)
+                else:
+                    result["model"] = model
                 return result
 
         # Fall back to generic detection
