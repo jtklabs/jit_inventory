@@ -151,15 +151,18 @@ class DeviceScanner:
                                     list(scalar_oids.values()), credential
                                 )
                                 # Map OID values back to field names
+                                # Build a lookup dict from response OID to value
+                                oid_to_value: dict[str, str] = {}
+                                for resp_oid, value in scalar_values.items():
+                                    # Normalize by stripping leading dots and "iso." prefix
+                                    norm = resp_oid.lstrip(".").replace("iso.", "1.")
+                                    oid_to_value[norm] = value
+
                                 scalar_data: dict[str, Any] = {}
                                 for name, oid in scalar_oids.items():
-                                    for resp_oid, value in scalar_values.items():
-                                        # Normalize OIDs for comparison (strip leading dot)
-                                        norm_oid = oid.lstrip(".")
-                                        norm_resp = resp_oid.lstrip(".")
-                                        if norm_oid == norm_resp or norm_resp.endswith("." + norm_oid):
-                                            scalar_data[name] = value
-                                            break
+                                    norm_oid = oid.lstrip(".")
+                                    if norm_oid in oid_to_value:
+                                        scalar_data[name] = oid_to_value[norm_oid]
 
                                 # Parse vendor-specific data
                                 if scalar_data:
@@ -215,24 +218,30 @@ class DeviceScanner:
                                 except SNMPError:
                                     ap_walk_results[name] = []
 
-                            if any(ap_walk_results.values()) and inventory:
+                            if any(ap_walk_results.values()):
                                 access_points = handler.parse_ap_table(ap_walk_results)
+                                # Create inventory if it doesn't exist
+                                if inventory is None:
+                                    inventory = handler.parse_entity_table({})
                                 inventory.access_points = access_points
 
                             # If no APs found and alternate table available, try that
-                            if not inventory.access_points and hasattr(handler, "get_ap_table_alt_oids"):
-                                alt_ap_oids = handler.get_ap_table_alt_oids()
-                                alt_ap_walk_results: dict[str, list[tuple[str, str]]] = {}
-                                for name, base_oid in alt_ap_oids.items():
-                                    try:
-                                        results = await client.walk(base_oid, credential)
-                                        alt_ap_walk_results[name] = results
-                                    except SNMPError:
-                                        alt_ap_walk_results[name] = []
+                            if hasattr(handler, "get_ap_table_alt_oids"):
+                                if inventory is None or not inventory.access_points:
+                                    alt_ap_oids = handler.get_ap_table_alt_oids()
+                                    alt_ap_walk_results: dict[str, list[tuple[str, str]]] = {}
+                                    for name, base_oid in alt_ap_oids.items():
+                                        try:
+                                            results = await client.walk(base_oid, credential)
+                                            alt_ap_walk_results[name] = results
+                                        except SNMPError:
+                                            alt_ap_walk_results[name] = []
 
-                                if any(alt_ap_walk_results.values()) and hasattr(handler, "parse_ap_table_alt"):
-                                    access_points = handler.parse_ap_table_alt(alt_ap_walk_results)
-                                    inventory.access_points = access_points
+                                    if any(alt_ap_walk_results.values()) and hasattr(handler, "parse_ap_table_alt"):
+                                        access_points = handler.parse_ap_table_alt(alt_ap_walk_results)
+                                        if inventory is None:
+                                            inventory = handler.parse_entity_table({})
+                                        inventory.access_points = access_points
 
                         # Store inventory in raw_data for saving to metadata
                         if inventory:

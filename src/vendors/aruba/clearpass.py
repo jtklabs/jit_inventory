@@ -233,8 +233,16 @@ class ClearPassHandler(VendorHandler):
 
         if model and model.strip():
             model_str = model.strip()
-            # Map model string to friendly name
-            parsed["model"] = self.MODEL_MAP.get(model_str, model_str)
+            # Check MODEL_MAP first
+            if model_str in self.MODEL_MAP:
+                parsed["model"] = self.MODEL_MAP[model_str]
+            else:
+                # Try to extract just the model code (e.g., "C2000" from "C2000 (R220)")
+                model_match = re.match(r"(C\d+)", model_str)
+                if model_match:
+                    parsed["model"] = f"ClearPass {model_match.group(1)}"
+                else:
+                    parsed["model"] = model_str
         elif ent_model and ent_model.strip():
             parsed["model"] = ent_model.strip()
         elif sys_descr:
