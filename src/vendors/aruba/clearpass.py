@@ -124,7 +124,7 @@ class ClearPassHandler(VendorHandler):
 
     @property
     def vendor_name(self) -> str:
-        return "aruba_clearpass"
+        return "aruba"
 
     @property
     def enterprise_id(self) -> int:
@@ -148,10 +148,10 @@ class ClearPassHandler(VendorHandler):
         result: dict[str, str | None] = {
             "device_type": "Policy Manager",
             "platform": "ClearPass",
-            "model": None,
+            "model": "ClearPass Policy Manager",  # Default model name
         }
 
-        # Try to extract model from sysDescr
+        # Try to extract more specific model from sysDescr
         if sys_descr:
             model_info = self._parse_model_from_sysdescr(sys_descr)
             if model_info.get("model"):
@@ -166,6 +166,7 @@ class ClearPassHandler(VendorHandler):
         ClearPass sysDescr examples:
         - "ClearPass Policy Manager"
         - "Aruba ClearPass Policy Manager Virtual Appliance"
+        - "Linux clearpass 4.14.0-1-amd64..."
         """
         result: dict[str, str | None] = {
             "model": None,
@@ -173,13 +174,7 @@ class ClearPassHandler(VendorHandler):
 
         sys_descr_lower = sys_descr.lower()
 
-        if "clearpass" in sys_descr_lower:
-            if "virtual" in sys_descr_lower:
-                result["model"] = "ClearPass VM"
-            else:
-                result["model"] = "ClearPass"
-
-        # Try to extract specific model patterns
+        # Try to extract specific model patterns first
         model_patterns = [
             r"(CP-HW-\w+)",
             r"(CP-VA-\w+)",
@@ -191,7 +186,14 @@ class ClearPassHandler(VendorHandler):
             if match:
                 model = match.group(1).upper()
                 result["model"] = self.MODEL_MAP.get(model, model)
-                break
+                return result
+
+        # Fall back to generic detection
+        if "clearpass" in sys_descr_lower:
+            if "virtual" in sys_descr_lower or "linux" in sys_descr_lower:
+                result["model"] = "ClearPass Policy Manager VM"
+            else:
+                result["model"] = "ClearPass Policy Manager"
 
         return result
 

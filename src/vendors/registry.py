@@ -10,18 +10,34 @@ class VendorRegistry:
     """
     Central registry for vendor handlers.
     Enables automatic vendor detection and handler routing.
+
+    Supports multiple handlers per vendor (e.g., Aruba WLC and ClearPass both
+    return vendor_name="aruba" but have different detection logic).
     """
 
     _handlers: dict[str, VendorHandler] = {}
+    _detection_handlers: list[VendorHandler] = []  # Ordered list for detection
     _enterprise_map: dict[int, str] = {}
     _initialized: bool = False
 
     @classmethod
-    def register(cls, handler_class: Type[VendorHandler]) -> None:
-        """Register a vendor handler."""
+    def register(cls, handler_class: Type[VendorHandler], detection_priority: bool = True) -> None:
+        """
+        Register a vendor handler.
+
+        Args:
+            handler_class: The handler class to register
+            detection_priority: If True, add to front of detection list (checked first)
+        """
         handler = handler_class()
+        # Store by vendor name (may overwrite if same name)
         cls._handlers[handler.vendor_name] = handler
         cls._enterprise_map[handler.enterprise_id] = handler.vendor_name
+        # Add to detection list (more specific handlers should be added first)
+        if detection_priority:
+            cls._detection_handlers.insert(0, handler)
+        else:
+            cls._detection_handlers.append(handler)
 
     @classmethod
     def get_handler(cls, vendor_name: str) -> VendorHandler | None:
@@ -33,9 +49,12 @@ class VendorRegistry:
     def detect_vendor(cls, sys_object_id: str) -> VendorHandler | None:
         """
         Detect vendor from sysObjectID and return appropriate handler.
+
+        Checks handlers in registration order - more specific handlers
+        (like ClearPass) should be registered before general ones (like Aruba WLC).
         """
         cls._ensure_initialized()
-        for handler in cls._handlers.values():
+        for handler in cls._detection_handlers:
             if handler.matches_sys_object_id(sys_object_id):
                 return handler
         return None
@@ -71,15 +90,16 @@ class VendorRegistry:
 
         cls.register(PaloAltoHandler)
 
-        # Import and register ClearPass handler (before Aruba to take priority)
-        from src.vendors.aruba.clearpass import ClearPassHandler
-
-        cls.register(ClearPassHandler)
-
-        # Import and register Aruba handler (excludes ClearPass OIDs)
+        # Import and register Aruba WLC handler first (lower priority)
         from src.vendors.aruba.collector import ArubaHandler
 
         cls.register(ArubaHandler)
+
+        # Import and register ClearPass handler last (higher priority, checked first)
+        # ClearPass has more specific OID match (1.3.6.1.4.1.14823.1.6.*)
+        from src.vendors.aruba.clearpass import ClearPassHandler
+
+        cls.register(ClearPassHandler)
 
         # Future vendor handlers will be registered here:
         # from src.vendors.juniper.collector import JuniperHandler
