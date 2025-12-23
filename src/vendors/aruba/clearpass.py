@@ -60,42 +60,42 @@ class ClearPassHandler(VendorHandler):
 
     # CPPM-MIB OIDs for ClearPass system information
     # Base: 1.3.6.1.4.1.14823.1.6.1.1.1.1.1
-    # Note: These are table OIDs, index is typically .1 for single-node
+    # Note: Index is .0 for scalar values
     CLEARPASS_OIDS = {
         # cppmSystemModel
-        "model": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.1.1",
+        "model": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.1.0",
         # cppmSystemSerialNumber
-        "serial_number": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.2.1",
+        "serial_number": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.2.0",
         # cppmSystemVersion
-        "sw_version": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.3.1",
+        "sw_version": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.3.0",
         # cppmSystemHostname
-        "hostname": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.4.1",
+        "hostname": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.4.0",
         # cppmClusterNodeType (1=publisher, 2=subscriber)
-        "cluster_node_type": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.5.1",
+        "cluster_node_type": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.5.0",
         # cppmZoneName
-        "zone_name": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.6.1",
+        "zone_name": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.6.0",
         # cppmNumClusterNodes
-        "cluster_nodes": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.7.1",
+        "cluster_nodes": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.7.0",
         # cppmNwMgmtPortIPAddress
-        "mgmt_ip": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.8.1",
+        "mgmt_ip": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.8.0",
         # cppmSystemMemoryTotal
-        "memory_total": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.12.1",
+        "memory_total": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.12.0",
         # cppmSystemMemoryFree
-        "memory_free": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.13.1",
+        "memory_free": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.13.0",
         # cppmSystemDiskSpaceTotal
-        "disk_total": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.14.1",
+        "disk_total": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.14.0",
         # cppmSystemDiskSpaceFree
-        "disk_free": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.15.1",
+        "disk_free": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.15.0",
         # cppmSystemNumCPUs
-        "num_cpus": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.16.1",
+        "num_cpus": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.16.0",
         # cppmSystemUptime
-        "uptime": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.17.1",
+        "uptime": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.17.0",
         # cppmHardwareFanStatus
-        "fan_status": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.19.1",
+        "fan_status": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.19.0",
         # cppmHardwarePowerStatus
-        "power_status": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.20.1",
+        "power_status": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.20.0",
         # cppmHardwareDiskStatus
-        "disk_status": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.22.1",
+        "disk_status": "1.3.6.1.4.1.14823.1.6.1.1.1.1.1.22.0",
         # Entity MIB fallbacks
         "ent_serial": "1.3.6.1.2.1.47.1.1.1.1.11.1",
         "ent_model": "1.3.6.1.2.1.47.1.1.1.1.13.1",
