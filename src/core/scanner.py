@@ -184,6 +184,21 @@ class DeviceScanner:
                                 access_points = handler.parse_ap_table(ap_walk_results)
                                 inventory.access_points = access_points
 
+                            # If no APs found and alternate table available, try that
+                            if not inventory.access_points and hasattr(handler, "get_ap_table_alt_oids"):
+                                alt_ap_oids = handler.get_ap_table_alt_oids()
+                                alt_ap_walk_results: dict[str, list[tuple[str, str]]] = {}
+                                for name, base_oid in alt_ap_oids.items():
+                                    try:
+                                        results = await client.walk(base_oid, credential)
+                                        alt_ap_walk_results[name] = results
+                                    except SNMPError:
+                                        alt_ap_walk_results[name] = []
+
+                                if any(alt_ap_walk_results.values()) and hasattr(handler, "parse_ap_table_alt"):
+                                    access_points = handler.parse_ap_table_alt(alt_ap_walk_results)
+                                    inventory.access_points = access_points
+
                         # Store inventory in raw_data for saving to metadata
                         if inventory:
                             device_info.raw_data = {"inventory": inventory.to_dict()}

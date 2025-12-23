@@ -148,14 +148,17 @@ class ArubaHandler(VendorHandler):
         "base_mac": "1.3.6.1.4.1.14823.2.2.1.2.1.7.0",
         # wlsxSysExtLicenseSerialNumber - License serial
         "license_serial": "1.3.6.1.4.1.14823.2.2.1.2.1.11.0",
+        # wlsxSwitchTotalNumAccessPoints - Total AP count
+        "ap_count": "1.3.6.1.4.1.14823.2.2.1.1.3.1.0",
         # Entity MIB fallbacks
         "ent_serial": "1.3.6.1.2.1.47.1.1.1.1.11.1",
         "ent_model": "1.3.6.1.2.1.47.1.1.1.1.13.1",
         "ent_descr": "1.3.6.1.2.1.47.1.1.1.1.2.1",
     }
 
-    # WLSX-WLAN-MIB OIDs for AP table (wlsxWlanAPTable)
+    # WLSX-WLAN-MIB OIDs for AP table (wlsxWlanAPTable) - ArubaOS 6.x+
     # Base: 1.3.6.1.4.1.14823.2.2.1.5.2.1.4.1
+    # Indexed by AP MAC address (6 octets)
     AP_TABLE_OIDS = {
         "wlanAPMacAddress": "1.3.6.1.4.1.14823.2.2.1.5.2.1.4.1.1",
         "wlanAPIpAddress": "1.3.6.1.4.1.14823.2.2.1.5.2.1.4.1.2",
@@ -167,6 +170,21 @@ class ArubaHandler(VendorHandler):
         "wlanAPStatus": "1.3.6.1.4.1.14823.2.2.1.5.2.1.4.1.19",
         "wlanAPSwVersion": "1.3.6.1.4.1.14823.2.2.1.5.2.1.4.1.34",
     }
+
+    # WLSX-SWITCH-MIB OIDs for AP table (wlsxSwitchAccessPointTable) - Older/alternative
+    # Base: 1.3.6.1.4.1.14823.2.2.1.1.3.3.1
+    # Indexed by BSSID MAC address (6 octets)
+    # Note: This table has less detail but may work on older controllers
+    AP_TABLE_ALT_OIDS = {
+        "apBSSID": "1.3.6.1.4.1.14823.2.2.1.1.3.3.1.1",
+        "apESSID": "1.3.6.1.4.1.14823.2.2.1.1.3.3.1.2",
+        "apIpAddress": "1.3.6.1.4.1.14823.2.2.1.1.3.3.1.5",
+        "apLocation": "1.3.6.1.4.1.14823.2.2.1.1.3.3.1.9",
+    }
+
+    # Total AP count OID (useful for verification)
+    # wlsxSwitchTotalNumAccessPoints
+    AP_COUNT_OID = "1.3.6.1.4.1.14823.2.2.1.1.3.1.0"
 
     # Entity MIB OID bases for walking (standard MIB)
     ENTITY_MIB_OIDS = {
@@ -238,8 +256,15 @@ class ArubaHandler(VendorHandler):
         return self.ENTERPRISE_ID
 
     def matches_sys_object_id(self, sys_object_id: str) -> bool:
-        """Check if sysObjectID belongs to Aruba Networks."""
+        """
+        Check if sysObjectID belongs to Aruba Networks (excluding ClearPass).
+
+        ClearPass uses 1.3.6.1.4.1.14823.1.6.* and should be handled by ClearPassHandler.
+        """
         normalized = sys_object_id.lstrip(".")
+        # Exclude ClearPass (1.6.*)
+        if normalized.startswith("1.3.6.1.4.1.14823.1.6"):
+            return False
         return normalized.startswith("1.3.6.1.4.1.14823")
 
     def identify_device_type(
@@ -394,6 +419,11 @@ class ArubaHandler(VendorHandler):
             parsed["metadata"]["base_mac"] = raw_data["base_mac"].strip()
         if raw_data.get("license_serial"):
             parsed["metadata"]["license_serial"] = raw_data["license_serial"].strip()
+        if raw_data.get("ap_count"):
+            try:
+                parsed["metadata"]["ap_count"] = int(raw_data["ap_count"])
+            except ValueError:
+                pass
 
         # Clean up empty metadata
         if not parsed["metadata"]:
@@ -428,8 +458,12 @@ class ArubaHandler(VendorHandler):
         return self.ENTITY_MIB_OIDS.copy()
 
     def get_ap_table_oids(self) -> dict[str, str]:
-        """Return AP table OID bases for walking."""
+        """Return AP table OID bases for walking (WLSX-WLAN-MIB)."""
         return self.AP_TABLE_OIDS.copy()
+
+    def get_ap_table_alt_oids(self) -> dict[str, str]:
+        """Return alternate AP table OID bases for walking (WLSX-SWITCH-MIB)."""
+        return self.AP_TABLE_ALT_OIDS.copy()
 
     def parse_entity_table(
         self, walk_results: dict[str, list[tuple[str, str]]]
@@ -566,6 +600,65 @@ class ArubaHandler(VendorHandler):
                     ap.software_version = value_str
 
         # Sort by AP name for consistent display
+        ap_list = list(access_points.values())
+        ap_list.sort(key=lambda x: x.name or x.mac_address)
+
+        return ap_list
+
+    def parse_ap_table_alt(
+        self, walk_results: dict[str, list[tuple[str, str]]]
+    ) -> list[AccessPoint]:
+        """
+        Parse WLSX-SWITCH-MIB AP table (wlsxSwitchAccessPointTable) as fallback.
+
+        This table has less detail but may work on older controllers.
+        Indexed by BSSID MAC address.
+
+        Args:
+            walk_results: Dict mapping OID name to list of (full_oid, value) tuples
+
+        Returns:
+            List of AccessPoint objects (with limited info)
+        """
+        access_points: dict[str, AccessPoint] = {}
+
+        def get_mac_index(oid: str, base_oid: str) -> str | None:
+            """Extract MAC address index from OID suffix."""
+            suffix = oid.replace(base_oid + ".", "")
+            parts = suffix.split(".")
+            if len(parts) >= 6:
+                try:
+                    mac_parts = [int(p) for p in parts[:6]]
+                    return ":".join(f"{p:02x}" for p in mac_parts)
+                except ValueError:
+                    return None
+            return None
+
+        for oid_name, results in walk_results.items():
+            base_oid = self.AP_TABLE_ALT_OIDS.get(oid_name)
+            if not base_oid:
+                continue
+
+            for full_oid, value in results:
+                mac = get_mac_index(full_oid, base_oid)
+                if mac is None:
+                    continue
+
+                if mac not in access_points:
+                    access_points[mac] = AccessPoint(mac_address=mac)
+
+                ap = access_points[mac]
+                value_str = str(value).strip() if value else None
+
+                if oid_name == "apIpAddress":
+                    ap.ip_address = value_str
+                elif oid_name == "apESSID":
+                    # Use ESSID as name if we don't have a real name
+                    if not ap.name:
+                        ap.name = value_str
+                elif oid_name == "apLocation":
+                    ap.location = value_str
+
         ap_list = list(access_points.values())
         ap_list.sort(key=lambda x: x.name or x.mac_address)
 

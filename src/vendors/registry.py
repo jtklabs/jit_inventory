@@ -71,7 +71,12 @@ class VendorRegistry:
 
         cls.register(PaloAltoHandler)
 
-        # Import and register Aruba handler
+        # Import and register ClearPass handler (before Aruba to take priority)
+        from src.vendors.aruba.clearpass import ClearPassHandler
+
+        cls.register(ClearPassHandler)
+
+        # Import and register Aruba handler (excludes ClearPass OIDs)
         from src.vendors.aruba.collector import ArubaHandler
 
         cls.register(ArubaHandler)
