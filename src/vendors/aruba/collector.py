@@ -566,6 +566,33 @@ class ArubaHandler(VendorHandler):
                     return None
             return None
 
+        def parse_ip_address(value: str | None) -> str | None:
+            """Convert SNMP IP address value to dotted-decimal string."""
+            if not value:
+                return None
+            # If it's already a valid IP format, return it
+            if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", value):
+                return value
+            # SNMP may return IP as raw bytes - try to convert
+            # Check if it looks like raw bytes (4 characters, non-printable)
+            if len(value) == 4:
+                try:
+                    octets = [ord(c) for c in value]
+                    return ".".join(str(o) for o in octets)
+                except (TypeError, ValueError):
+                    pass
+            # Try interpreting as bytes object representation
+            if value.startswith("0x") or all(c in "0123456789abcdefABCDEF" for c in value):
+                try:
+                    # Hex string like "0a0b0c0d" or "0x0a0b0c0d"
+                    hex_str = value.replace("0x", "")
+                    if len(hex_str) == 8:
+                        octets = [int(hex_str[i:i+2], 16) for i in range(0, 8, 2)]
+                        return ".".join(str(o) for o in octets)
+                except (ValueError, IndexError):
+                    pass
+            return value  # Return as-is if we can't parse it
+
         for oid_name, results in walk_results.items():
             base_oid = self.AP_TABLE_OIDS.get(oid_name)
             if not base_oid:
@@ -583,7 +610,7 @@ class ArubaHandler(VendorHandler):
                 value_str = str(value).strip() if value else None
 
                 if oid_name == "wlanAPIpAddress":
-                    ap.ip_address = value_str
+                    ap.ip_address = parse_ip_address(value_str)
                 elif oid_name == "wlanAPName":
                     ap.name = value_str
                 elif oid_name == "wlanAPGroupName":
@@ -634,6 +661,22 @@ class ArubaHandler(VendorHandler):
                     return None
             return None
 
+        def parse_ip_address(value: str | None) -> str | None:
+            """Convert SNMP IP address value to dotted-decimal string."""
+            if not value:
+                return None
+            # If it's already a valid IP format, return it
+            if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", value):
+                return value
+            # SNMP may return IP as raw bytes - try to convert
+            if len(value) == 4:
+                try:
+                    octets = [ord(c) for c in value]
+                    return ".".join(str(o) for o in octets)
+                except (TypeError, ValueError):
+                    pass
+            return value
+
         for oid_name, results in walk_results.items():
             base_oid = self.AP_TABLE_ALT_OIDS.get(oid_name)
             if not base_oid:
@@ -651,7 +694,7 @@ class ArubaHandler(VendorHandler):
                 value_str = str(value).strip() if value else None
 
                 if oid_name == "apIpAddress":
-                    ap.ip_address = value_str
+                    ap.ip_address = parse_ip_address(value_str)
                 elif oid_name == "apESSID":
                     # Use ESSID as name if we don't have a real name
                     if not ap.name:
