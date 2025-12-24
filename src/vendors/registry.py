@@ -101,8 +101,12 @@ class VendorRegistry:
 
         cls.register(ClearPassHandler)
 
+        # Import and register Juniper handler
+        from src.vendors.juniper.collector import JuniperHandler
+
+        cls.register(JuniperHandler)
+
         # Future vendor handlers will be registered here:
-        # from src.vendors.juniper.collector import JuniperHandler
         # from src.vendors.fortinet.collector import FortinetHandler
         # from src.vendors.f5.collector import F5Handler
         # from src.vendors.infoblox.collector import InfobloxHandler
