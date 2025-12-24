@@ -194,6 +194,14 @@ class DeviceScanner:
                         inventory = None
                         if entity_walk_results and hasattr(handler, "parse_entity_table"):
                             inventory = handler.parse_entity_table(entity_walk_results)
+                            # If we have a chassis with model info, prefer it over scalar OID data
+                            # (e.g., Palo Alto hw_version returns revision, not model name)
+                            if inventory and inventory.chassis:
+                                if inventory.chassis.model_name:
+                                    device_info.model = inventory.chassis.model_name
+                                # Also use chassis serial if available
+                                if inventory.chassis.serial_number:
+                                    device_info.serial_number = inventory.chassis.serial_number
 
                         # Walk and parse license info if handler supports it
                         if hasattr(handler, "get_license_mib_oids") and hasattr(handler, "parse_license_table"):
