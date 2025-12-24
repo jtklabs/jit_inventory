@@ -106,8 +106,22 @@ class VendorRegistry:
 
         cls.register(JuniperHandler)
 
-        # Future vendor handlers will be registered here:
-        # from src.vendors.fortinet.collector import FortinetHandler
-        # from src.vendors.f5.collector import F5Handler
-        # from src.vendors.infoblox.collector import InfobloxHandler
-        # from src.vendors.checkpoint.collector import CheckpointHandler
+        # Import and register Fortinet FortiGate handler
+        from src.vendors.fortinet.collector import FortinetHandler
+
+        cls.register(FortinetHandler)
+
+        # Import and register F5 BIG-IP handler
+        from src.vendors.f5.collector import F5Handler
+
+        cls.register(F5Handler)
+
+        # Import and register Infoblox handler
+        from src.vendors.infoblox.collector import InfobloxHandler
+
+        cls.register(InfobloxHandler)
+
+        # Import and register Check Point handler
+        from src.vendors.checkpoint.collector import CheckpointHandler
+
+        cls.register(CheckpointHandler)
