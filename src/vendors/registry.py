@@ -125,3 +125,8 @@ class VendorRegistry:
         from src.vendors.checkpoint.collector import CheckpointHandler
 
         cls.register(CheckpointHandler)
+
+        # Import and register Opengear handler
+        from src.vendors.opengear.collector import OpengearHandler
+
+        cls.register(OpengearHandler)
