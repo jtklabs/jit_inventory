@@ -204,6 +204,7 @@ function refreshSelectedDevices() {
     }
 
     const btn = document.getElementById('refreshSelectedBtn');
+    const originalHtml = btn.innerHTML;
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starting...';
 
@@ -220,19 +221,21 @@ function refreshSelectedDevices() {
             // Uncheck all boxes
             document.querySelectorAll('.device-checkbox').forEach(cb => cb.checked = false);
             document.getElementById('selectAllCheckbox').checked = false;
-            updateSelectedCount();
             // Start polling for job status
             checkRunningJobs();
         } else {
             alert('Error: ' + (data.error || 'Unknown error'));
         }
+        // Restore button and update count
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Refresh Selected (<span id="selectedCount">0</span>)';
+        updateSelectedCount();
     })
     .catch(err => {
         alert('Error starting refresh: ' + err);
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Refresh Selected (<span id="selectedCount">0</span>)';
+        updateSelectedCount();
     });
 }
 

@@ -75,14 +75,21 @@ class OpengearHandler(VendorHandler):
     ENTERPRISE_ID = 25049
     OID_PREFIX = "1.3.6.1.4.1.25049"
 
-    # OG-STATUSv2-MIB OIDs for device information
-    # Base: 1.3.6.1.4.1.25049.17.1 (ogSystem)
+    # Opengear MIB OIDs for device information
+    # Different firmware versions use different MIB branches
     OPENGEAR_OIDS = {
-        # ogFirmwareVersion - Device firmware version
-        "sw_version": "1.3.6.1.4.1.25049.17.1.1.0",
-        # ogSerialNumber - Device serial number
-        "serial_number": "1.3.6.1.4.1.25049.17.1.2.0",
-        # Entity MIB fallbacks
+        # OG-STATUSv2-MIB (newer firmware, 4.x+)
+        # ogSystem branch: 1.3.6.1.4.1.25049.17.1
+        "sw_version": "1.3.6.1.4.1.25049.17.1.1.0",        # ogFirmwareVersion
+        "serial_number": "1.3.6.1.4.1.25049.17.1.2.0",     # ogSerialNumber
+        # OG-STATUS-MIB (older firmware)
+        # ogStatus.ogBasicStatus branch: 1.3.6.1.4.1.25049.16.1
+        "sw_version_alt": "1.3.6.1.4.1.25049.16.1.1.0",    # ogBasicFirmwareVersion
+        "serial_number_alt": "1.3.6.1.4.1.25049.16.1.2.0", # ogBasicSerialNumber
+        # OG-HOST-MIB (some OM/CM devices)
+        # ogHostSystem branch: 1.3.6.1.4.1.25049.2.1
+        "serial_number_host": "1.3.6.1.4.1.25049.2.1.5.0", # ogHostSerialNumber
+        # Entity MIB fallbacks (index 1 = chassis)
         "ent_serial": "1.3.6.1.2.1.47.1.1.1.1.11.1",
         "ent_model": "1.3.6.1.2.1.47.1.1.1.1.13.1",
         "ent_descr": "1.3.6.1.2.1.47.1.1.1.1.2.1",
@@ -269,12 +276,18 @@ class OpengearHandler(VendorHandler):
         """Parse Opengear-specific SNMP responses."""
         parsed: dict[str, Any] = {}
 
-        # Serial number
+        # Serial number - try multiple sources (different MIB versions)
         serial = raw_data.get("serial_number", "")
+        serial_alt = raw_data.get("serial_number_alt", "")
+        serial_host = raw_data.get("serial_number_host", "")
         ent_serial = raw_data.get("ent_serial", "")
 
         if serial and serial.strip():
             parsed["serial_number"] = serial.strip()
+        elif serial_alt and serial_alt.strip():
+            parsed["serial_number"] = serial_alt.strip()
+        elif serial_host and serial_host.strip():
+            parsed["serial_number"] = serial_host.strip()
         elif ent_serial and ent_serial.strip():
             parsed["serial_number"] = ent_serial.strip()
         else:
@@ -298,10 +311,13 @@ class OpengearHandler(VendorHandler):
         else:
             parsed["model"] = None
 
-        # Software version (firmware)
+        # Software version (firmware) - try multiple sources
         sw_version = raw_data.get("sw_version", "")
+        sw_version_alt = raw_data.get("sw_version_alt", "")
         if sw_version and sw_version.strip():
             parsed["software_version"] = sw_version.strip()
+        elif sw_version_alt and sw_version_alt.strip():
+            parsed["software_version"] = sw_version_alt.strip()
         elif sys_descr:
             parsed["software_version"] = self._extract_version_from_sysdescr(sys_descr)
         else:
@@ -334,6 +350,24 @@ class OpengearHandler(VendorHandler):
     def get_entity_mib_oids(self) -> dict[str, str]:
         """Return Entity MIB OID bases for walking."""
         return self.ENTITY_MIB_OIDS.copy()
+
+    def parse_basic_info_from_entity_walk(
+        self, walk_results: dict[str, list[tuple[str, str]]], sys_descr: str | None = None
+    ) -> dict[str, Any]:
+        """
+        Opengear-specific override to handle devices that may not populate
+        Entity MIB with serial numbers.
+
+        Falls back to parsing version from sysDescr if Entity MIB doesn't have it.
+        """
+        # Call parent implementation first
+        result = super().parse_basic_info_from_entity_walk(walk_results, sys_descr)
+
+        # If no software version from Entity MIB, parse from sysDescr
+        if not result.get("software_version") and sys_descr:
+            result["software_version"] = self._extract_version_from_sysdescr(sys_descr)
+
+        return result
 
     def parse_entity_table(
         self, walk_results: dict[str, list[tuple[str, str]]]
