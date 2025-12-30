@@ -233,8 +233,6 @@ class AristaHandler(VendorHandler):
             model_lower = result["model"].lower()
             if "ccs" in model_lower or "cvp" in model_lower:
                 result["device_type"] = "Management"
-            elif any(x in model_lower for x in ["7500", "7504", "7508", "7800"]):
-                result["device_type"] = "Modular Switch"
             else:
                 result["device_type"] = "Switch"
 

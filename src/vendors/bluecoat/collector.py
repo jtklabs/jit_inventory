@@ -193,14 +193,9 @@ class BlueCoatHandler(VendorHandler):
                 if proxy_match:
                     result["model"] = f"SG{proxy_match.group(1)}"
 
-        # Determine device type
+        # All Blue Coat devices are proxies
         if result["model"]:
-            if "VA" in result["model"]:
-                result["device_type"] = "Virtual Proxy"
-            elif "ASG" in result["model"]:
-                result["device_type"] = "Advanced Secure Gateway"
-            else:
-                result["device_type"] = "Proxy Appliance"
+            result["device_type"] = "Proxy"
 
         return result
 

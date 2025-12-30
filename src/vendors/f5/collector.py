@@ -195,7 +195,7 @@ class F5Handler(VendorHandler):
                 result["model"] = model_match.group(1)
             elif "virtual" in sys_descr_lower:
                 result["model"] = "BIG-IP VE"
-                result["device_type"] = "Virtual Load Balancer"
+            result["device_type"] = "Load Balancer"
 
         return result
 

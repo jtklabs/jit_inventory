@@ -221,14 +221,8 @@ class FortinetHandler(VendorHandler):
                 result["model"] = match.group(1)
                 break
 
-        # Determine device type
-        sys_descr_lower = sys_descr.lower()
-        if "fortiwifi" in sys_descr_lower or "fwf-" in sys_descr_lower:
-            result["device_type"] = "Wireless Firewall"
-        elif "fortigate-vm" in sys_descr_lower or "fgt-vm" in sys_descr_lower:
-            result["device_type"] = "Virtual Firewall"
-        else:
-            result["device_type"] = "Firewall"
+        # All FortiGate devices are firewalls
+        result["device_type"] = "Firewall"
 
         return result
 

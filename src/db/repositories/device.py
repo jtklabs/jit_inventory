@@ -136,11 +136,21 @@ class DeviceRepository:
         self.session.flush()
 
     def get_vendors(self) -> list[str]:
-        """Get list of distinct vendors."""
-        stmt = select(Device.vendor).distinct().where(Device.vendor.isnot(None))
+        """Get list of distinct vendors, sorted alphabetically."""
+        stmt = (
+            select(Device.vendor)
+            .distinct()
+            .where(Device.vendor.isnot(None))
+            .order_by(Device.vendor)
+        )
         return [v for v in self.session.execute(stmt).scalars().all() if v]
 
     def get_device_types(self) -> list[str]:
-        """Get list of distinct device types."""
-        stmt = select(Device.device_type).distinct().where(Device.device_type.isnot(None))
+        """Get list of distinct device types, sorted alphabetically."""
+        stmt = (
+            select(Device.device_type)
+            .distinct()
+            .where(Device.device_type.isnot(None))
+            .order_by(Device.device_type)
+        )
         return [t for t in self.session.execute(stmt).scalars().all() if t]

@@ -242,23 +242,9 @@ class DellHandler(VendorHandler):
                 result["model"] = match.group(1).upper()
                 break
 
-        # Determine device type from model
+        # All Dell networking devices are switches
         if result["model"]:
-            model_upper = result["model"].upper()
-            if model_upper.startswith("S"):
-                result["device_type"] = "Data Center Switch"
-            elif model_upper.startswith("N"):
-                result["device_type"] = "Campus Switch"
-            elif model_upper.startswith("Z"):
-                result["device_type"] = "Fabric Switch"
-            elif model_upper.startswith("M"):
-                result["device_type"] = "Blade Switch"
-            elif model_upper.startswith("C"):
-                result["device_type"] = "Aggregation Switch"
-            elif model_upper.startswith("E"):
-                result["device_type"] = "Edge Switch"
-            else:
-                result["device_type"] = "Switch"
+            result["device_type"] = "Switch"
 
         return result
 
