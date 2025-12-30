@@ -130,3 +130,8 @@ class VendorRegistry:
         from src.vendors.opengear.collector import OpengearHandler
 
         cls.register(OpengearHandler)
+
+        # Import and register Dell EMC Networking handler
+        from src.vendors.dell.collector import DellHandler
+
+        cls.register(DellHandler)
