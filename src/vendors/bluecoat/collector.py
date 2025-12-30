@@ -174,30 +174,60 @@ class BlueCoatHandler(VendorHandler):
 
         # Model patterns - order matters, more specific first
         model_patterns = [
-            # "410 Series" format -> SG410
+            # "410 Series" or "S410" format -> SG410
             r"Blue Coat\s+(\d+)\s+Series",
+            r"Blue Coat\s+S(\d+)",
             # SG series with number
             r"(SG-?S?\d+)",
             r"(SG\d+)",
+            # S-series without SG prefix (e.g., "S400", "S500")
+            r"\b(S\d{3,4})\b",
             # ProxySG with number
             r"ProxySG[\s\-]*(\d+)",
             # Virtual appliance
             r"(ProxySG-VA)",
             # Advanced Secure Gateway
             r"(ASG-S\d+)",
+            # Model number at end like "410" before "Series" or standalone
+            r"(\d{3,4})\s*Series",
         ]
 
         for pattern in model_patterns:
             match = re.search(pattern, sys_descr, re.I)
             if match:
                 model = match.group(1).upper()
-                # Normalize model format - add SG prefix if just a number
+                # Normalize model format - add SG prefix if just a number or S-series
                 if model.isdigit():
                     model = f"SG{model}"
+                elif model.startswith("S") and model[1:].isdigit():
+                    # S400 -> SG400
+                    model = f"SG{model[1:]}"
                 elif not model.startswith("SG") and not model.startswith("ASG") and not model.startswith("PROXYSG"):
                     model = f"SG{model}"
                 result["model"] = model
                 break
+
+        # If no model found from patterns, try fallback approaches
+        if not result["model"]:
+            # Try "Blue Coat XXX" where XXX might be model
+            fallback_match = re.search(r"Blue Coat\s+([A-Z]?\d{3,4})", sys_descr, re.I)
+            if fallback_match:
+                model = fallback_match.group(1).upper()
+                if model.isdigit():
+                    model = f"SG{model}"
+                elif model.startswith("S") and model[1:].isdigit():
+                    model = f"SG{model[1:]}"
+                result["model"] = model
+
+        # Last resort: look for "SWG Edition" or similar and try to find a model number
+        if not result["model"]:
+            # Check for SWG (Secure Web Gateway) edition
+            if "SWG" in sys_descr.upper():
+                result["device_type"] = "Secure Web Gateway"
+            # Try to find any standalone 3-4 digit number that could be a model
+            standalone_match = re.search(r"\b(\d{3,4})\b", sys_descr)
+            if standalone_match:
+                result["model"] = f"SG{standalone_match.group(1)}"
 
         # Determine device type
         if result["model"]:
