@@ -359,7 +359,7 @@ def refresh_all_devices():
     # Get device count first
     with get_db_session() as session:
         device_repo = DeviceRepository(session)
-        devices = device_repo.get_all(limit=1000)
+        devices = device_repo.get_all(limit=10000)
         device_ips = [d.ip_address for d in devices]
 
     if not device_ips:
@@ -787,7 +787,7 @@ def api_devices():
     try:
         with get_db_session() as session:
             device_repo = DeviceRepository(session)
-            devices = device_repo.get_all(limit=1000)
+            devices = device_repo.get_all(limit=10000)
             return jsonify(
                 {
                     "devices": [
