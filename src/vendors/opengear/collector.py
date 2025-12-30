@@ -168,7 +168,7 @@ class OpengearHandler(VendorHandler):
     ) -> dict[str, str | None]:
         """Identify Opengear device type from sysDescr and sysObjectID."""
         result: dict[str, str | None] = {
-            "device_type": "Console Server",
+            "device_type": "Console Appliance",
             "platform": "Opengear",
             "model": None,
         }
@@ -177,15 +177,12 @@ class OpengearHandler(VendorHandler):
         model_from_oid = self._parse_model_from_oid(sys_object_id)
         if model_from_oid:
             result["model"] = model_from_oid
-            result["device_type"] = self._get_device_type_from_model(model_from_oid)
 
         # If no model from OID, try sysDescr
         if not result["model"] and sys_descr:
             model_info = self._parse_model_from_sysdescr(sys_descr)
             if model_info.get("model"):
                 result["model"] = model_info["model"]
-            if model_info.get("device_type"):
-                result["device_type"] = model_info["device_type"]
 
         return result
 
@@ -200,7 +197,6 @@ class OpengearHandler(VendorHandler):
         """
         result: dict[str, str | None] = {
             "model": None,
-            "device_type": None,
         }
 
         # Extract model patterns
@@ -226,32 +222,7 @@ class OpengearHandler(VendorHandler):
                 result["model"] = match.group(1).upper()
                 break
 
-        if result["model"]:
-            result["device_type"] = self._get_device_type_from_model(result["model"])
-
         return result
-
-    def _get_device_type_from_model(self, model: str) -> str:
-        """Determine device type from model string."""
-        if not model:
-            return "Console Server"
-
-        model_upper = model.upper()
-
-        if model_upper.startswith("OM"):
-            return "Operations Manager"
-        elif model_upper.startswith("IM"):
-            return "Infrastructure Manager"
-        elif model_upper.startswith("ACM"):
-            return "Advanced Console Manager"
-        elif model_upper.startswith("CM"):
-            return "Console Manager"
-        elif model_upper.startswith("SD"):
-            return "Serial Device Server"
-        elif "LIGHTHOUSE" in model_upper:
-            return "Management Platform"
-        else:
-            return "Console Server"
 
     def _parse_model_from_oid(self, sys_object_id: str) -> str | None:
         """
