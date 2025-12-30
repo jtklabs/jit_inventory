@@ -148,7 +148,7 @@ class InfobloxHandler(VendorHandler):
     ) -> dict[str, str | None]:
         """Identify Infoblox device type from sysDescr and sysObjectID."""
         result: dict[str, str | None] = {
-            "device_type": "DDI Appliance",
+            "device_type": "IPAM",
             "platform": "NIOS",
             "model": None,
         }
