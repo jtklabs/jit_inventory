@@ -80,15 +80,15 @@ class OpengearHandler(VendorHandler):
     OPENGEAR_OIDS = {
         # OG-STATUSv2-MIB (newer firmware, 4.x+)
         # ogSystem branch: 1.3.6.1.4.1.25049.17.1
-        "sw_version": "1.3.6.1.4.1.25049.17.1.1.0",        # ogFirmwareVersion
-        "serial_number": "1.3.6.1.4.1.25049.17.1.2.0",     # ogSerialNumber
+        "sw_version": "1.3.6.1.4.1.25049.17.1.1",          # ogFirmwareVersion
+        "serial_number": "1.3.6.1.4.1.25049.17.1.2",       # ogSerialNumber
         # OG-STATUS-MIB (older firmware)
         # ogStatus.ogBasicStatus branch: 1.3.6.1.4.1.25049.16.1
-        "sw_version_alt": "1.3.6.1.4.1.25049.16.1.1.0",    # ogBasicFirmwareVersion
-        "serial_number_alt": "1.3.6.1.4.1.25049.16.1.2.0", # ogBasicSerialNumber
+        "sw_version_alt": "1.3.6.1.4.1.25049.16.1.1",      # ogBasicFirmwareVersion
+        "serial_number_alt": "1.3.6.1.4.1.25049.16.1.2",   # ogBasicSerialNumber
         # OG-HOST-MIB (some OM/CM devices)
         # ogHostSystem branch: 1.3.6.1.4.1.25049.2.1
-        "serial_number_host": "1.3.6.1.4.1.25049.2.1.5.0", # ogHostSerialNumber
+        "serial_number_host": "1.3.6.1.4.1.25049.2.1.5",   # ogHostSerialNumber
         # Entity MIB fallbacks (index 1 = chassis)
         "ent_serial": "1.3.6.1.2.1.47.1.1.1.1.11.1",
         "ent_model": "1.3.6.1.2.1.47.1.1.1.1.13.1",
