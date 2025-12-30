@@ -286,15 +286,27 @@ class OpengearHandler(VendorHandler):
         sw_version = raw_data.get("sw_version", "")
         sw_version_alt = raw_data.get("sw_version_alt", "")
         if sw_version and sw_version.strip():
-            parsed["software_version"] = sw_version.strip()
+            parsed["software_version"] = self._clean_version(sw_version.strip())
         elif sw_version_alt and sw_version_alt.strip():
-            parsed["software_version"] = sw_version_alt.strip()
+            parsed["software_version"] = self._clean_version(sw_version_alt.strip())
         elif sys_descr:
             parsed["software_version"] = self._extract_version_from_sysdescr(sys_descr)
         else:
             parsed["software_version"] = None
 
         return parsed
+
+    def _clean_version(self, version_str: str) -> str:
+        """
+        Clean version string to extract just the version number.
+
+        Example: "5.2.2 0e3bbf7d ()" -> "5.2.2"
+        """
+        # Extract just the version number (X.Y.Z format)
+        match = re.match(r"(\d+\.\d+\.\d+)", version_str)
+        if match:
+            return match.group(1)
+        return version_str
 
     def _extract_version_from_sysdescr(self, sys_descr: str) -> str | None:
         """
