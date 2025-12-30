@@ -135,3 +135,8 @@ class VendorRegistry:
         from src.vendors.dell.collector import DellHandler
 
         cls.register(DellHandler)
+
+        # Import and register Blue Coat (Symantec/Broadcom) handler
+        from src.vendors.bluecoat.collector import BlueCoatHandler
+
+        cls.register(BlueCoatHandler)
