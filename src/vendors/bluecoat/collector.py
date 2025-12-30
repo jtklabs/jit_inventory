@@ -243,32 +243,44 @@ class BlueCoatHandler(VendorHandler):
         else:
             parsed["serial_number"] = None
 
-        # Model/Platform - try Blue Coat specific OID
-        platform = raw_data.get("platform", "")
-        ent_model = raw_data.get("ent_model", "")
-        ent_descr = raw_data.get("ent_descr", "")
-
-        if platform and platform.strip():
-            parsed["model"] = platform.strip()
-        elif ent_model and ent_model.strip():
-            parsed["model"] = ent_model.strip()
-        elif ent_descr and ent_descr.strip():
-            parsed["model"] = ent_descr.strip()
-        elif sys_descr:
+        # Model - always parse from sysDescr since Blue Coat OIDs often return
+        # full description strings rather than just model numbers
+        parsed["model"] = None
+        if sys_descr:
             model_info = self._parse_model_from_sysdescr(sys_descr)
             parsed["model"] = model_info.get("model")
-        else:
-            parsed["model"] = None
 
-        # Software version - try Blue Coat OID, then parse from sysDescr
-        sw_version = raw_data.get("sw_version", "")
+        # If no model from sysDescr, try the platform OID but parse it
+        if not parsed["model"]:
+            platform = raw_data.get("platform", "")
+            if platform and platform.strip():
+                # Try to parse model from platform string (may be description-like)
+                model_info = self._parse_model_from_sysdescr(platform)
+                if model_info.get("model"):
+                    parsed["model"] = model_info["model"]
+                else:
+                    # If it's a short string (likely actual model), use it directly
+                    if len(platform.strip()) < 30 and "," not in platform:
+                        parsed["model"] = platform.strip()
 
-        if sw_version and sw_version.strip():
-            parsed["software_version"] = sw_version.strip()
-        elif sys_descr:
+        # Software version - always parse from sysDescr for reliability
+        parsed["software_version"] = None
+        if sys_descr:
             parsed["software_version"] = self._extract_version_from_sysdescr(sys_descr)
-        else:
-            parsed["software_version"] = None
+
+        # If no version from sysDescr, try the sw_version OID
+        if not parsed["software_version"]:
+            sw_version = raw_data.get("sw_version", "")
+            if sw_version and sw_version.strip():
+                # Check if it looks like a version number
+                version_match = re.match(r"^[\d\.]+$", sw_version.strip())
+                if version_match:
+                    parsed["software_version"] = sw_version.strip()
+                else:
+                    # Try to extract version from the string
+                    extracted = self._extract_version_from_sysdescr(sw_version)
+                    if extracted:
+                        parsed["software_version"] = extracted
 
         return parsed
 
