@@ -177,7 +177,7 @@ class AristaHandler(VendorHandler):
     ) -> dict[str, str | None]:
         """Identify Arista device type from sysDescr and sysObjectID."""
         result: dict[str, str | None] = {
-            "device_type": "switch",  # Arista primarily makes switches
+            "device_type": "Switch",  # Arista primarily makes switches
             "platform": "EOS",
             "model": None,
         }
