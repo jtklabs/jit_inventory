@@ -161,6 +161,7 @@ class BlueCoatHandler(VendorHandler):
         Extract model from sysDescr.
 
         Blue Coat sysDescr format examples:
+        - "Blue Coat 410 Series, Version: SGOS 7.4.9.3, Release id:  2.4.4.1 (123456)"
         - "Blue Coat SG600, Version: SGOS 6.7.5.1, Release id: 123456"
         - "Blue Coat SG9000, Version: SGOS 7.2.3.1"
         - "Blue Coat ProxySG 900, SGOS 6.5.10.1"
@@ -171,9 +172,11 @@ class BlueCoatHandler(VendorHandler):
             "device_type": None,
         }
 
-        # Model patterns
+        # Model patterns - order matters, more specific first
         model_patterns = [
-            # SG series
+            # "410 Series" format -> SG410
+            r"Blue Coat\s+(\d+)\s+Series",
+            # SG series with number
             r"(SG-?S?\d+)",
             r"(SG\d+)",
             # ProxySG with number
@@ -188,8 +191,10 @@ class BlueCoatHandler(VendorHandler):
             match = re.search(pattern, sys_descr, re.I)
             if match:
                 model = match.group(1).upper()
-                # Normalize model format
-                if not model.startswith("SG") and not model.startswith("ASG"):
+                # Normalize model format - add SG prefix if just a number
+                if model.isdigit():
+                    model = f"SG{model}"
+                elif not model.startswith("SG") and not model.startswith("ASG") and not model.startswith("PROXYSG"):
                     model = f"SG{model}"
                 result["model"] = model
                 break
