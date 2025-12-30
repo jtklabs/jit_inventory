@@ -6,6 +6,9 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-box-seam"></i> Device Inventory</h2>
     <div>
+        <button type="button" class="btn btn-outline-success me-2" id="refreshSelectedBtn" style="display: none;" onclick="refreshSelectedDevices()">
+            <i class="bi bi-arrow-clockwise"></i> Refresh Selected (<span id="selectedCount">0</span>)
+        </button>
         <form method="POST" action="{{ url_for('refresh_all_devices') }}" class="d-inline">
             <button type="submit" class="btn btn-outline-primary me-2" onclick="this.disabled=true; this.innerHTML='<span class=\'spinner-border spinner-border-sm\'></span> Refreshing...'; this.form.submit();">
                 <i class="bi bi-arrow-clockwise"></i> Refresh All
@@ -48,7 +51,7 @@
                     {% endfor %}
                 </select>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label for="status" class="form-label">Status</label>
                 <select class="form-select" id="status" name="status">
                     <option value="">All</option>
@@ -56,7 +59,7 @@
                     <option value="inactive" {% if filters.status == 'inactive' %}selected{% endif %}>Inactive</option>
                 </select>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <button type="submit" class="btn btn-primary w-100">
                     <i class="bi bi-funnel"></i> Filter
                 </button>
@@ -65,14 +68,29 @@
     </div>
 </div>
 
+<!-- Search Box -->
+<div class="mb-3">
+    <div class="input-group">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input type="text" class="form-control" id="searchInput" placeholder="Search by IP, hostname, vendor, model, serial..." oninput="filterTable()">
+        <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('searchInput').value=''; filterTable();">
+            <i class="bi bi-x-lg"></i>
+        </button>
+    </div>
+    <small class="text-muted">Showing <span id="visibleCount">{{ devices|length }}</span> of {{ devices|length }} devices</small>
+</div>
+
 <!-- Devices Table -->
 <div class="card">
     <div class="card-body">
         {% if devices %}
             <div class="table-responsive">
-                <table class="table table-hover mb-0">
+                <table class="table table-hover mb-0" id="devicesTable">
                     <thead>
                         <tr>
+                            <th style="width: 40px;">
+                                <input type="checkbox" class="form-check-input" id="selectAllCheckbox" onchange="toggleSelectAll(this)">
+                            </th>
                             <th>IP Address</th>
                             <th>Hostname</th>
                             <th>Vendor</th>
@@ -85,19 +103,22 @@
                             <th>Status</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="devicesTableBody">
                         {% for device in devices %}
-                            <tr class="device-row" style="cursor: pointer;" onclick="window.location='{{ url_for('device_detail', device_id=device.id) }}'">
-                                <td><code>{{ device.ip_address }}</code></td>
-                                <td>{{ device.hostname or '-' }}</td>
-                                <td>{{ device.vendor|capitalize if device.vendor else '-' }}</td>
-                                <td>{{ device.device_type or '-' }}</td>
-                                <td>{{ device.platform or '-' }}</td>
-                                <td>{{ device.model or '-' }}</td>
-                                <td><code>{{ device.serial_number or '-' }}</code></td>
-                                <td>{{ device.software_version or '-' }}</td>
-                                <td>{{ device.last_seen.strftime('%Y-%m-%d %H:%M') if device.last_seen else '-' }}</td>
-                                <td>
+                            <tr class="device-row" data-device-id="{{ device.id }}" data-searchable="{{ device.ip_address }} {{ device.hostname or '' }} {{ device.vendor or '' }} {{ device.device_type or '' }} {{ device.platform or '' }} {{ device.model or '' }} {{ device.serial_number or '' }} {{ device.software_version or '' }}">
+                                <td onclick="event.stopPropagation();">
+                                    <input type="checkbox" class="form-check-input device-checkbox" value="{{ device.id }}" onchange="updateSelectedCount()">
+                                </td>
+                                <td style="cursor: pointer;" onclick="window.location='{{ url_for('device_detail', device_id=device.id) }}'"><code>{{ device.ip_address }}</code></td>
+                                <td style="cursor: pointer;" onclick="window.location='{{ url_for('device_detail', device_id=device.id) }}'">{{ device.hostname or '-' }}</td>
+                                <td style="cursor: pointer;" onclick="window.location='{{ url_for('device_detail', device_id=device.id) }}'">{{ device.vendor|capitalize if device.vendor else '-' }}</td>
+                                <td style="cursor: pointer;" onclick="window.location='{{ url_for('device_detail', device_id=device.id) }}'">{{ device.device_type or '-' }}</td>
+                                <td style="cursor: pointer;" onclick="window.location='{{ url_for('device_detail', device_id=device.id) }}'">{{ device.platform or '-' }}</td>
+                                <td style="cursor: pointer;" onclick="window.location='{{ url_for('device_detail', device_id=device.id) }}'">{{ device.model or '-' }}</td>
+                                <td style="cursor: pointer;" onclick="window.location='{{ url_for('device_detail', device_id=device.id) }}'"><code>{{ device.serial_number or '-' }}</code></td>
+                                <td style="cursor: pointer;" onclick="window.location='{{ url_for('device_detail', device_id=device.id) }}'">{{ device.software_version or '-' }}</td>
+                                <td style="cursor: pointer;" onclick="window.location='{{ url_for('device_detail', device_id=device.id) }}'">{{ device.last_seen.strftime('%Y-%m-%d %H:%M') if device.last_seen else '-' }}</td>
+                                <td style="cursor: pointer;" onclick="window.location='{{ url_for('device_detail', device_id=device.id) }}'">
                                     {% if device.is_active %}
                                         <span class="badge bg-success">Active</span>
                                     {% else %}
@@ -122,8 +143,122 @@
 </div>
 
 <script>
+// Search/filter functionality
+function filterTable() {
+    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+    const rows = document.querySelectorAll('#devicesTableBody tr.device-row');
+    let visibleCount = 0;
+
+    rows.forEach(row => {
+        const searchable = row.getAttribute('data-searchable').toLowerCase();
+        if (searchable.includes(searchTerm)) {
+            row.style.display = '';
+            visibleCount++;
+        } else {
+            row.style.display = 'none';
+        }
+    });
+
+    document.getElementById('visibleCount').textContent = visibleCount;
+}
+
+// Multi-select functionality
+function toggleSelectAll(checkbox) {
+    const deviceCheckboxes = document.querySelectorAll('.device-checkbox');
+    const visibleCheckboxes = Array.from(deviceCheckboxes).filter(cb => {
+        return cb.closest('tr').style.display !== 'none';
+    });
+    visibleCheckboxes.forEach(cb => {
+        cb.checked = checkbox.checked;
+    });
+    updateSelectedCount();
+}
+
+function updateSelectedCount() {
+    const checkedBoxes = document.querySelectorAll('.device-checkbox:checked');
+    const count = checkedBoxes.length;
+    document.getElementById('selectedCount').textContent = count;
+    document.getElementById('refreshSelectedBtn').style.display = count > 0 ? 'inline-block' : 'none';
+
+    // Update select all checkbox state
+    const allCheckboxes = document.querySelectorAll('.device-checkbox');
+    const visibleCheckboxes = Array.from(allCheckboxes).filter(cb => {
+        return cb.closest('tr').style.display !== 'none';
+    });
+    const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+    if (visibleCheckboxes.length > 0) {
+        const allChecked = visibleCheckboxes.every(cb => cb.checked);
+        const someChecked = visibleCheckboxes.some(cb => cb.checked);
+        selectAllCheckbox.checked = allChecked;
+        selectAllCheckbox.indeterminate = someChecked && !allChecked;
+    }
+}
+
+function refreshSelectedDevices() {
+    const checkedBoxes = document.querySelectorAll('.device-checkbox:checked');
+    const deviceIds = Array.from(checkedBoxes).map(cb => cb.value);
+
+    if (deviceIds.length === 0) {
+        alert('No devices selected');
+        return;
+    }
+
+    const btn = document.getElementById('refreshSelectedBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starting...';
+
+    fetch('/inventory/refresh-selected', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ device_ids: deviceIds })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Uncheck all boxes
+            document.querySelectorAll('.device-checkbox').forEach(cb => cb.checked = false);
+            document.getElementById('selectAllCheckbox').checked = false;
+            updateSelectedCount();
+            // Start polling for job status
+            checkRunningJobs();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Refresh Selected (<span id="selectedCount">0</span>)';
+    })
+    .catch(err => {
+        alert('Error starting refresh: ' + err);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Refresh Selected (<span id="selectedCount">0</span>)';
+    });
+}
+
 // Check for running jobs and display progress
 let jobRefreshInterval = null;
+
+function cancelJob(jobId) {
+    if (!confirm('Are you sure you want to cancel this scan?')) {
+        return;
+    }
+
+    fetch(`/api/jobs/${jobId}/cancel`, {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            checkRunningJobs();
+        } else {
+            alert('Failed to cancel: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => {
+        alert('Error cancelling job: ' + err);
+    });
+}
 
 function checkRunningJobs() {
     fetch('/api/jobs')
@@ -135,7 +270,14 @@ function checkRunningJobs() {
             if (runningJobs.length > 0) {
                 let html = '';
                 for (const job of runningJobs) {
-                    const jobLabel = job.job_type === 'refresh_all' ? 'Refresh All' : 'Batch Scan';
+                    let jobLabel = 'Scan';
+                    if (job.job_type === 'refresh_all') {
+                        jobLabel = 'Refresh All';
+                    } else if (job.job_type === 'refresh_selected') {
+                        jobLabel = 'Refresh Selected';
+                    } else if (job.job_type === 'batch') {
+                        jobLabel = 'Batch Scan';
+                    }
                     html += `
                         <div class="alert alert-info mb-3">
                             <div class="d-flex justify-content-between align-items-center mb-2">
@@ -143,7 +285,12 @@ function checkRunningJobs() {
                                     <span class="spinner-border spinner-border-sm me-2" role="status"></span>
                                     ${jobLabel} in progress...
                                 </strong>
-                                <span>${job.completed_count} / ${job.total_targets} devices</span>
+                                <div>
+                                    <span class="me-3">${job.completed_count} / ${job.total_targets} devices</span>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="cancelJob('${job.id}')">
+                                        <i class="bi bi-x-circle"></i> Cancel
+                                    </button>
+                                </div>
                             </div>
                             <div class="progress" style="height: 20px;">
                                 <div class="progress-bar progress-bar-striped progress-bar-animated"
@@ -169,12 +316,32 @@ function checkRunningJobs() {
                     jobRefreshInterval = setInterval(checkRunningJobs, 2000);
                 }
             } else {
-                container.innerHTML = '';
+                // Check for recently cancelled jobs
+                const cancelledJobs = data.jobs.filter(j => j.status === 'cancelled');
+                if (cancelledJobs.length > 0) {
+                    const mostRecent = cancelledJobs[0];
+                    const cancelledTime = new Date(mostRecent.completed_at);
+                    const now = new Date();
+                    // Show cancelled message for 5 seconds
+                    if ((now - cancelledTime) < 5000) {
+                        container.innerHTML = `
+                            <div class="alert alert-warning mb-3">
+                                <i class="bi bi-x-circle"></i> Scan was cancelled.
+                                Completed ${mostRecent.completed_count} of ${mostRecent.total_targets} devices before cancellation.
+                            </div>
+                        `;
+                    } else {
+                        container.innerHTML = '';
+                    }
+                } else {
+                    container.innerHTML = '';
+                }
+
                 if (jobRefreshInterval) {
                     clearInterval(jobRefreshInterval);
                     jobRefreshInterval = null;
                     // Reload page to show updated data
-                    if (data.jobs.length > 0 && data.jobs[0].status === 'completed') {
+                    if (data.jobs.length > 0 && (data.jobs[0].status === 'completed' || data.jobs[0].status === 'cancelled')) {
                         location.reload();
                     }
                 }

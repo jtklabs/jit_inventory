@@ -216,6 +216,30 @@ class JuniperHandler(VendorHandler):
         "22": "J4320",
         "23": "J2320",
         "24": "J2350",
+        # PTX Series Routers
+        "79": "PTX5000",
+        "83": "PTX3000",
+        "138": "PTX1000",
+        "148": "PTX10002",
+        "149": "PTX10001",
+        "153": "PTX10008",
+        "157": "PTX10016",
+        "163": "PTX10003",
+        "166": "PTX10004",
+        "171": "PTX10005",
+        # ACX Series Routers
+        "87": "ACX1000",
+        "94": "ACX2000",
+        "95": "ACX4000",
+        "108": "ACX5000",
+        "128": "ACX500",
+        "129": "ACX1100",
+        "142": "ACX5048",
+        "143": "ACX5096",
+        "172": "ACX7100",
+        "173": "ACX7024",
+        "174": "ACX7348",
+        "175": "ACX7509",
     }
 
     @property
@@ -283,12 +307,16 @@ class JuniperHandler(VendorHandler):
             r"(mx\d+[a-z0-9\-]*)",
             # QFX series (switches)
             r"(qfx\d+[a-z0-9\-]*)",
-            # T series (routers)
-            r"(t\d+[a-z0-9\-]*)",
-            # M series (routers)
-            r"\s(m\d+[a-z0-9\-]*)\s",
-            # J series (routers)
+            # T series (routers) - e.g., t640, t320, t1600
+            r"\b(t\d{3,4}[a-z0-9\-]*)",
+            # M series (routers) - e.g., m40, m320, m7i, m10i
+            r"\b(m\d+[a-z0-9\-]*)",
+            # J series (routers) - e.g., j2300, j4300
             r"(j\d+[a-z0-9\-]*)",
+            # PTX series (routers)
+            r"(ptx\d+[a-z0-9\-]*)",
+            # ACX series (routers)
+            r"(acx\d+[a-z0-9\-]*)",
         ]
 
         for pattern in model_patterns:
@@ -325,9 +353,14 @@ class JuniperHandler(VendorHandler):
             return "Switch"
         elif model_upper.startswith("MX"):
             return "Router"
+        elif model_upper.startswith("PTX"):
+            return "Router"
+        elif model_upper.startswith("ACX"):
+            return "Router"
         elif model_upper.startswith("T"):
             return "Router"
-        elif model_upper.startswith("M"):
+        elif model_upper.startswith("M") and len(model_upper) > 1 and model_upper[1].isdigit():
+            # M series routers: M40, M320, M7i, etc. (avoid matching "MX")
             return "Router"
         elif model_upper.startswith("J"):
             return "Router"
@@ -381,7 +414,7 @@ class JuniperHandler(VendorHandler):
             parsed["model"] = ent_model.strip()
         elif ent_descr and ent_descr.strip():
             # Try to extract model from Entity description
-            model_match = re.search(r"((?:SRX|EX|MX|QFX|T|M|J)\d+[A-Z0-9\-]*)", ent_descr, re.I)
+            model_match = re.search(r"((?:SRX|EX|MX|QFX|PTX|ACX|T|M|J)\d+[A-Z0-9\-]*)", ent_descr, re.I)
             if model_match:
                 parsed["model"] = model_match.group(1).upper()
             else:
@@ -417,7 +450,7 @@ class JuniperHandler(VendorHandler):
         """Clean up model string from jnxBoxDescr."""
         # jnxBoxDescr might have format like "SRX340" or longer descriptions
         # Try to extract just the model number
-        match = re.search(r"((?:SRX|EX|MX|QFX|T|M|J)\d+[A-Z0-9\-]*)", model, re.I)
+        match = re.search(r"((?:SRX|EX|MX|QFX|PTX|ACX|T|M|J)\d+[A-Z0-9\-]*)", model, re.I)
         if match:
             return match.group(1).upper()
         return model

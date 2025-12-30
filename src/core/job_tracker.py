@@ -3,6 +3,7 @@ Database-backed job tracker for background scan operations.
 """
 from datetime import datetime
 from typing import Any
+import threading
 
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
@@ -13,6 +14,11 @@ from src.db.models import ScanJob
 
 class JobTracker:
     """Database-backed job tracker for background scan operations."""
+
+    def __init__(self):
+        """Initialize the job tracker with a cancellation registry."""
+        self._cancelled_jobs: set[str] = set()
+        self._lock = threading.Lock()
 
     def create_job(self, job_type: str, total_targets: int, metadata: dict[str, Any] | None = None) -> ScanJob:
         """Create a new scan job."""
@@ -59,6 +65,30 @@ class JobTracker:
                 job.completed_at = datetime.utcnow()
                 job.error_message = error
                 session.commit()
+        # Clean up cancellation registry
+        with self._lock:
+            self._cancelled_jobs.discard(job_id)
+
+    def cancel_job(self, job_id: str) -> bool:
+        """Request cancellation of a running job."""
+        with get_db_session() as session:
+            job = session.get(ScanJob, job_id)
+            if job and job.status == "running":
+                # Mark as cancelled in the database
+                job.status = "cancelled"
+                job.completed_at = datetime.utcnow()
+                job.error_message = "Cancelled by user"
+                session.commit()
+                # Add to in-memory cancellation set for running tasks to check
+                with self._lock:
+                    self._cancelled_jobs.add(job_id)
+                return True
+            return False
+
+    def is_cancelled(self, job_id: str) -> bool:
+        """Check if a job has been cancelled."""
+        with self._lock:
+            return job_id in self._cancelled_jobs
 
     def get_job(self, job_id: str) -> ScanJob | None:
         """Get a job by ID."""

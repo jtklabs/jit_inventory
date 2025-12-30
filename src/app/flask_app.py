@@ -211,7 +211,13 @@ def batch_scan():
                             semaphore = asyncio.Semaphore(concurrency)
 
                             async def scan_one(ip):
+                                # Check for cancellation before each scan
+                                if job_tracker.is_cancelled(job_id):
+                                    return None
                                 async with semaphore:
+                                    # Check again after acquiring semaphore
+                                    if job_tracker.is_cancelled(job_id):
+                                        return None
                                     result = await scanner.scan_device(
                                         ip_address=ip,
                                         credential=credential,
@@ -227,9 +233,11 @@ def batch_scan():
                         asyncio.set_event_loop(loop)
                         try:
                             loop.run_until_complete(do_scan())
-                            job_tracker.complete_job(job_id)
+                            if not job_tracker.is_cancelled(job_id):
+                                job_tracker.complete_job(job_id)
                         except Exception as e:
-                            job_tracker.complete_job(job_id, error=str(e))
+                            if not job_tracker.is_cancelled(job_id):
+                                job_tracker.complete_job(job_id, error=str(e))
                         finally:
                             loop.close()
 
@@ -287,7 +295,7 @@ def inventory():
                 vendor=vendor_filter if vendor_filter else None,
                 device_type=type_filter if type_filter else None,
                 is_active=is_active,
-                limit=500,
+                limit=10000,  # Increased from 500 to support larger inventories
             )
     except Exception as e:
         error = str(e)
@@ -383,7 +391,13 @@ def refresh_all_devices():
             semaphore = asyncio.Semaphore(10)  # Limit concurrency
 
             async def scan_one(ip):
+                # Check for cancellation before each scan
+                if job_tracker.is_cancelled(job_id):
+                    return
                 async with semaphore:
+                    # Check again after acquiring semaphore
+                    if job_tracker.is_cancelled(job_id):
+                        return
                     result = await scanner.scan_device_auto_discover(
                         ip_address=ip,
                         profiles=all_profiles,
@@ -397,9 +411,11 @@ def refresh_all_devices():
         asyncio.set_event_loop(loop)
         try:
             loop.run_until_complete(refresh_devices())
-            job_tracker.complete_job(job_id)
+            if not job_tracker.is_cancelled(job_id):
+                job_tracker.complete_job(job_id)
         except Exception as e:
-            job_tracker.complete_job(job_id, error=str(e))
+            if not job_tracker.is_cancelled(job_id):
+                job_tracker.complete_job(job_id, error=str(e))
         finally:
             loop.close()
 
@@ -812,6 +828,99 @@ def api_get_job(job_id):
     if not job:
         return jsonify({"error": "Job not found"}), 404
     return jsonify(job.to_dict())
+
+
+@app.route("/api/jobs/<job_id>/cancel", methods=["POST"])
+def api_cancel_job(job_id):
+    """Cancel a running job."""
+    job_tracker = get_job_tracker()
+    success = job_tracker.cancel_job(job_id)
+    if success:
+        return jsonify({"success": True, "message": "Job cancelled"})
+    else:
+        return jsonify({"success": False, "error": "Job not found or not running"}), 400
+
+
+@app.route("/inventory/refresh-selected", methods=["POST"])
+def refresh_selected_devices():
+    """Refresh selected devices by re-scanning them with auto-discover."""
+    import threading
+
+    data = request.get_json()
+    device_ids = data.get("device_ids", [])
+
+    if not device_ids:
+        return jsonify({"error": "No devices selected"}), 400
+
+    # Get device IPs from database
+    with get_db_session() as session:
+        device_repo = DeviceRepository(session)
+        device_ips = []
+        for device_id in device_ids:
+            device = device_repo.get_by_id(device_id)
+            if device:
+                device_ips.append(device.ip_address)
+
+    if not device_ips:
+        return jsonify({"error": "No valid devices found"}), 400
+
+    # Create job tracker entry
+    job_tracker = get_job_tracker()
+    job = job_tracker.create_job(
+        job_type="refresh_selected",
+        total_targets=len(device_ips),
+        metadata={"description": f"Refresh {len(device_ips)} selected devices"}
+    )
+
+    def run_refresh(job_id: str, device_ips: list):
+        """Background task to refresh selected devices."""
+        job_tracker = get_job_tracker()
+        job_tracker.start_job(job_id)
+
+        async def refresh_devices():
+            cred_provider = get_credential_provider()
+            all_profiles = await cred_provider.get_all_profiles_ordered()
+
+            if not all_profiles:
+                raise Exception("No credential profiles configured")
+
+            scanner = DeviceScanner()
+            semaphore = asyncio.Semaphore(10)
+
+            async def scan_one(ip):
+                # Check for cancellation before each scan
+                if job_tracker.is_cancelled(job_id):
+                    return
+                async with semaphore:
+                    # Check again after acquiring semaphore
+                    if job_tracker.is_cancelled(job_id):
+                        return
+                    result = await scanner.scan_device_auto_discover(
+                        ip_address=ip,
+                        profiles=all_profiles,
+                        scan_type="refresh",
+                    )
+                    job_tracker.update_progress(job_id, result.success)
+
+            await asyncio.gather(*[scan_one(ip) for ip in device_ips])
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(refresh_devices())
+            if not job_tracker.is_cancelled(job_id):
+                job_tracker.complete_job(job_id)
+        except Exception as e:
+            if not job_tracker.is_cancelled(job_id):
+                job_tracker.complete_job(job_id, error=str(e))
+        finally:
+            loop.close()
+
+    # Run in background thread
+    thread = threading.Thread(target=run_refresh, args=(job.id, device_ips))
+    thread.start()
+
+    return jsonify({"success": True, "job_id": job.id, "device_count": len(device_ips)})
 
 
 if __name__ == "__main__":

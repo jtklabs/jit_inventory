@@ -283,6 +283,10 @@ class CiscoHandler(VendorHandler):
         elif "adaptive security" in sys_descr_lower or "asa software" in sys_descr_lower:
             result["platform"] = "ASA"
             result["device_type"] = "Firewall"
+        elif "s72033_rp" in sys_descr_lower or "s32" in sys_descr_lower:
+            # Catalyst 6500 series supervisor software (s72033_rp = Sup720, s32xx = Sup32)
+            result["platform"] = "IOS"
+            result["device_type"] = "Switch"
         elif "ios software" in sys_descr_lower or "cisco ios software" in sys_descr_lower:
             result["platform"] = "IOS"
             # IOS can be switch or router - check for router indicators
@@ -303,6 +307,17 @@ class CiscoHandler(VendorHandler):
             (r"CISCO(\d{4}[A-Z0-9\-/]*).*[Rr]outer", "ISR {}"),
             # Catalyst 9000 series
             (r"(C9\d{3}[A-Z0-9\-]*)", "Catalyst {}"),
+            # Catalyst 6500/6800 series (modular) - software name patterns like "s72033_rp" or "s3223_rp"
+            (r"(s72033)[_\-]", "Catalyst 6500"),
+            (r"(s32[0-9]{2,3})[_\-]", "Catalyst 6500"),
+            # WS-C model patterns
+            (r"(WS-C6509[A-Z0-9\-]*)", "Catalyst {}"),
+            (r"(WS-C6506[A-Z0-9\-]*)", "Catalyst {}"),
+            (r"(WS-C6504[A-Z0-9\-]*)", "Catalyst {}"),
+            (r"(WS-C6503[A-Z0-9\-]*)", "Catalyst {}"),
+            (r"(WS-C6807[A-Z0-9\-]*)", "Catalyst {}"),
+            (r"(WS-C6880[A-Z0-9\-]*)", "Catalyst {}"),
+            (r"(WS-C6500[A-Z0-9\-]*)", "Catalyst {}"),
             # Catalyst with WS- prefix
             (r"(WS-C\d{4}[A-Z0-9\-]*)", "{}"),
             # Catalyst from software name (e.g., "C3750 Software") - but not if Router in description
@@ -456,6 +471,7 @@ class CiscoHandler(VendorHandler):
         # Common patterns in entPhysicalDescr
         patterns = [
             r"(C9\d{3}[A-Z0-9\-]*)",
+            r"(WS-C6\d{3}[A-Z0-9\-]*)",  # Catalyst 6500/6800 series
             r"(WS-C\d{4}[A-Z0-9\-]*)",
             r"(N\d{1,2}K-C\d+[A-Z0-9\-]*)",
             r"Catalyst\s+(\d{4}[A-Z0-9\-]*)",

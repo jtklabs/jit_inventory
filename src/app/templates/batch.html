@@ -106,12 +106,17 @@
                                 </div>
                                 <div>
                                     {% if job.status == 'running' %}
-                                        <span class="badge bg-primary">
+                                        <span class="badge bg-primary me-2">
                                             <span class="spinner-border spinner-border-sm" role="status"></span>
                                             Running
                                         </span>
+                                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="cancelJob('{{ job.id }}')">
+                                            <i class="bi bi-x-circle"></i> Cancel
+                                        </button>
                                     {% elif job.status == 'completed' %}
                                         <span class="badge bg-success">Completed</span>
+                                    {% elif job.status == 'cancelled' %}
+                                        <span class="badge bg-warning">Cancelled</span>
                                     {% elif job.status == 'failed' %}
                                         <span class="badge bg-danger">Failed</span>
                                     {% else %}
@@ -170,6 +175,27 @@
 // Auto-refresh jobs every 2 seconds if there are running jobs
 let refreshInterval = null;
 
+function cancelJob(jobId) {
+    if (!confirm('Are you sure you want to cancel this scan?')) {
+        return;
+    }
+
+    fetch(`/api/jobs/${jobId}/cancel`, {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            refreshJobs();
+        } else {
+            alert('Failed to cancel: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => {
+        alert('Error cancelling job: ' + err);
+    });
+}
+
 function refreshJobs() {
     fetch('/api/jobs')
         .then(response => response.json())
@@ -205,13 +231,19 @@ function updateJobsDisplay(jobs) {
     for (const job of jobs) {
         const isRunning = job.status === 'running';
         const isCompleted = job.status === 'completed';
+        const isCancelled = job.status === 'cancelled';
         const isFailed = job.status === 'failed';
 
         let statusBadge = '';
         if (isRunning) {
-            statusBadge = '<span class="badge bg-primary"><span class="spinner-border spinner-border-sm" role="status"></span> Running</span>';
+            statusBadge = `<span class="badge bg-primary me-2"><span class="spinner-border spinner-border-sm" role="status"></span> Running</span>
+                           <button type="button" class="btn btn-sm btn-outline-danger" onclick="cancelJob('${job.id}')">
+                               <i class="bi bi-x-circle"></i> Cancel
+                           </button>`;
         } else if (isCompleted) {
             statusBadge = '<span class="badge bg-success">Completed</span>';
+        } else if (isCancelled) {
+            statusBadge = '<span class="badge bg-warning">Cancelled</span>';
         } else if (isFailed) {
             statusBadge = '<span class="badge bg-danger">Failed</span>';
         } else {
@@ -219,7 +251,7 @@ function updateJobsDisplay(jobs) {
         }
 
         let jobIcon = job.job_type === 'batch' ? 'bi-list-check' : 'bi-arrow-clockwise';
-        let jobLabel = job.job_type === 'batch' ? 'Batch Scan' : (job.job_type === 'refresh_all' ? 'Refresh All' : job.job_type);
+        let jobLabel = job.job_type === 'batch' ? 'Batch Scan' : (job.job_type === 'refresh_all' ? 'Refresh All' : (job.job_type === 'refresh_selected' ? 'Refresh Selected' : job.job_type));
 
         html += `
             <div class="job-item mb-3 p-3 border rounded ${isRunning ? 'border-primary' : ''}" id="job-${job.id}">
@@ -231,9 +263,9 @@ function updateJobsDisplay(jobs) {
                     <div>${statusBadge}</div>
                 </div>
 
-                ${(isRunning || isCompleted) ? `
+                ${(isRunning || isCompleted || isCancelled) ? `
                     <div class="progress mb-2" style="height: 20px;">
-                        <div class="progress-bar ${isCompleted ? 'bg-success' : ''}"
+                        <div class="progress-bar ${isCompleted ? 'bg-success' : (isCancelled ? 'bg-warning' : '')}"
                              role="progressbar"
                              style="width: ${job.progress_percent}%"
                              aria-valuenow="${job.progress_percent}"
