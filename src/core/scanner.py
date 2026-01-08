@@ -432,6 +432,17 @@ class DeviceScanner:
             with get_db_session() as session:
                 # Update or create device
                 device_repo = DeviceRepository(session)
+
+                # Get existing device to merge inventory data
+                existing_device = device_repo.get_by_ip(device_info.ip_address)
+
+                # Merge inventory data to track removed modules
+                metadata = device_info.raw_data if device_info.raw_data else None
+                if metadata and existing_device and existing_device.metadata_:
+                    metadata = self._merge_inventory_with_removed_tracking(
+                        existing_device.metadata_, metadata
+                    )
+
                 device, created = device_repo.update_or_create(
                     ip_address=device_info.ip_address,
                     hostname=device_info.hostname,
@@ -443,7 +454,7 @@ class DeviceScanner:
                     software_version=device_info.software_version,
                     sys_object_id=device_info.sys_object_id,
                     sys_description=device_info.sys_description,
-                    metadata=device_info.raw_data if device_info.raw_data else None,
+                    metadata=metadata,
                     credential_profile_name=credential_profile_name,
                 )
 
@@ -503,3 +514,57 @@ class DeviceScanner:
         except Exception as e:
             logger.error(f"Failed to save failed scan to database: {e}", exc_info=True)
             return None
+
+    def _merge_inventory_with_removed_tracking(
+        self,
+        old_metadata: dict[str, Any],
+        new_metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Merge old and new inventory data, marking removed components.
+
+        Components that were present in the old inventory but are not in the
+        new scan will be marked as 'removed' with a timestamp.
+        """
+        old_inventory = old_metadata.get("inventory", {})
+        new_inventory = new_metadata.get("inventory", {})
+
+        if not old_inventory or not new_inventory:
+            return new_metadata
+
+        # Track removed modules, power supplies, and fans
+        for component_type in ["modules", "power_supplies", "fans"]:
+            old_components = old_inventory.get(component_type, [])
+            new_components = new_inventory.get(component_type, [])
+
+            # Build a set of serials in the new scan for quick lookup
+            new_serials = set()
+            for comp in new_components:
+                serial = comp.get("serial")
+                if serial and serial.lower() not in ("builtin", "", "n/a"):
+                    new_serials.add(serial)
+
+            # Check each old component
+            for old_comp in old_components:
+                old_serial = old_comp.get("serial")
+                if not old_serial or old_serial.lower() in ("builtin", "", "n/a"):
+                    continue
+
+                # Skip if already marked as removed
+                if old_comp.get("removed_at"):
+                    # Keep the removed component in the new inventory
+                    # Check if it's back (was re-added)
+                    if old_serial in new_serials:
+                        # Component is back, don't mark as removed
+                        continue
+                    # Still removed, keep tracking it
+                    new_components.append(old_comp)
+                elif old_serial not in new_serials:
+                    # Component was removed - mark it with timestamp
+                    old_comp["removed_at"] = datetime.utcnow().isoformat()
+                    new_components.append(old_comp)
+
+            new_inventory[component_type] = new_components
+
+        new_metadata["inventory"] = new_inventory
+        return new_metadata

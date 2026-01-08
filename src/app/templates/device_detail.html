@@ -206,11 +206,12 @@
                         <th>Serial Number</th>
                         <th>Hardware Rev</th>
                         <th>FRU</th>
+                        <th>Status</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for module in inventory.modules %}
-                    <tr>
+                    <tr class="{% if module.removed_at %}table-danger{% endif %}">
                         {% if inventory.is_stack %}
                         <td>
                             {# Calculate which switch this module belongs to based on contained_in #}
@@ -232,6 +233,13 @@
                                 <span class="badge bg-success">Yes</span>
                             {% else %}
                                 <span class="badge bg-secondary">No</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if module.removed_at %}
+                                <span class="badge bg-danger" title="Removed {{ module.removed_at }}">Removed</span>
+                            {% else %}
+                                <span class="badge bg-success">Present</span>
                             {% endif %}
                         </td>
                     </tr>
@@ -260,11 +268,12 @@
                         <th>Name</th>
                         <th>Model</th>
                         <th>Serial Number</th>
+                        <th>Status</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for psu in inventory.power_supplies %}
-                    <tr>
+                    <tr class="{% if psu.removed_at %}table-danger{% endif %}">
                         {% if inventory.is_stack %}
                         <td>
                             {% set switch_num = ((psu.contained_in or 0) // 1000) %}
@@ -278,6 +287,13 @@
                         <td>{{ psu.name or psu.description or psu.model or '-' }}</td>
                         <td>{{ psu.model or '-' }}</td>
                         <td><code>{{ psu.serial or '-' }}</code></td>
+                        <td>
+                            {% if psu.removed_at %}
+                                <span class="badge bg-danger" title="Removed {{ psu.removed_at }}">Removed</span>
+                            {% else %}
+                                <span class="badge bg-success">Present</span>
+                            {% endif %}
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -303,11 +319,12 @@
                         {% endif %}
                         <th>Name</th>
                         <th>Description</th>
+                        <th>Status</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for fan in inventory.fans %}
-                    <tr>
+                    <tr class="{% if fan.removed_at %}table-danger{% endif %}">
                         {% if inventory.is_stack %}
                         <td>
                             {% set switch_num = ((fan.contained_in or 0) // 1000) %}
@@ -320,6 +337,13 @@
                         {% endif %}
                         <td>{{ fan.name or '-' }}</td>
                         <td>{{ fan.description or '-' }}</td>
+                        <td>
+                            {% if fan.removed_at %}
+                                <span class="badge bg-danger" title="Removed {{ fan.removed_at }}">Removed</span>
+                            {% else %}
+                                <span class="badge bg-success">Present</span>
+                            {% endif %}
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>

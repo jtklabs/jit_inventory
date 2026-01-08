@@ -638,12 +638,20 @@ class JuniperHandler(VendorHandler):
 
                 if oid_name == "jnxContentsDescr":
                     fru_components[idx]["description"] = value_str
+                    # Use description as the name since Juniper FRUs don't have a separate name field
+                    fru_components[idx]["name"] = value_str
                 elif oid_name == "jnxContentsSerialNo":
+                    # Strip "S/N " prefix if present (common in Juniper serial numbers)
+                    if value_str.upper().startswith("S/N "):
+                        value_str = value_str[4:].strip()
+                    elif value_str.upper().startswith("S/N"):
+                        value_str = value_str[3:].strip()
                     fru_components[idx]["serial_number"] = value_str
                 elif oid_name == "jnxContentsRevision":
                     fru_components[idx]["hardware_rev"] = value_str
                 elif oid_name == "jnxContentsPartNo":
-                    fru_components[idx]["model_name"] = value_str
+                    # Store as part_number, not model - part numbers are internal Juniper codes
+                    fru_components[idx]["part_number"] = value_str
 
         # Now try to match FRU data to existing inventory components
         # Match by description or name similarity
@@ -654,7 +662,8 @@ class JuniperHandler(VendorHandler):
                 continue
 
             fru_desc = fru_data.get("description", "").lower()
-            fru_model = fru_data.get("model_name", "")
+            fru_name = fru_data.get("name", "")  # Human-readable name from jnxContentsDescr
+            fru_part_no = fru_data.get("part_number", "")  # Internal part number
             matched = False
 
             # Try to match to existing modules
@@ -670,8 +679,12 @@ class JuniperHandler(VendorHandler):
                 # Check for description match
                 if fru_desc and (fru_desc in module_desc or module_desc in fru_desc):
                     module.serial_number = fru_serial
-                    if fru_model and not module.model_name:
-                        module.model_name = fru_model
+                    # Set name from FRU description if module name is empty
+                    if fru_name and not module.name:
+                        module.name = fru_name
+                    # Use description as model if no model set (more useful than part number)
+                    if fru_name and not module.model_name:
+                        module.model_name = fru_name
                     if fru_data.get("hardware_rev"):
                         module.hardware_rev = fru_data["hardware_rev"]
                     matched = True
@@ -680,8 +693,10 @@ class JuniperHandler(VendorHandler):
                 # Check for name match
                 if fru_desc and (fru_desc in module_name or module_name in fru_desc):
                     module.serial_number = fru_serial
-                    if fru_model and not module.model_name:
-                        module.model_name = fru_model
+                    if fru_name and not module.name:
+                        module.name = fru_name
+                    if fru_name and not module.model_name:
+                        module.model_name = fru_name
                     if fru_data.get("hardware_rev"):
                         module.hardware_rev = fru_data["hardware_rev"]
                     matched = True
@@ -699,8 +714,10 @@ class JuniperHandler(VendorHandler):
                     if "power" in fru_desc or "psu" in fru_desc or "pem" in fru_desc:
                         if fru_desc in psu_desc or psu_desc in fru_desc or fru_desc in psu_name:
                             psu.serial_number = fru_serial
-                            if fru_model and not psu.model_name:
-                                psu.model_name = fru_model
+                            if fru_name and not psu.name:
+                                psu.name = fru_name
+                            if fru_name and not psu.model_name:
+                                psu.model_name = fru_name
                             matched = True
                             break
 
@@ -709,9 +726,10 @@ class JuniperHandler(VendorHandler):
                 # Create a new module entry
                 new_module = EntityComponent(
                     index=hash(fru_idx) % 100000,  # Generate a unique index
+                    name=fru_name or None,
                     description=fru_data.get("description"),
                     serial_number=fru_serial,
-                    model_name=fru_model or None,
+                    model_name=fru_name or None,  # Use description as model (more useful than part number)
                     hardware_rev=fru_data.get("hardware_rev"),
                     entity_class=9,  # Module
                 )
