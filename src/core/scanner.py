@@ -193,7 +193,23 @@ class DeviceScanner:
                         # Parse full inventory (modules, stack members)
                         inventory = None
                         if entity_walk_results and hasattr(handler, "parse_entity_table"):
-                            inventory = handler.parse_entity_table(entity_walk_results)
+                            # For Juniper, also walk the jnxContentsTable for real module serial numbers
+                            juniper_contents_results: dict[str, list[tuple[str, str]]] = {}
+                            if hasattr(handler, "get_juniper_contents_oids"):
+                                contents_oids = handler.get_juniper_contents_oids()
+                                for name, base_oid in contents_oids.items():
+                                    try:
+                                        results = await client.walk(base_oid, credential)
+                                        juniper_contents_results[name] = results
+                                    except SNMPError:
+                                        juniper_contents_results[name] = []
+
+                            # Pass both entity and Juniper contents data to parse_entity_table
+                            if juniper_contents_results and any(juniper_contents_results.values()):
+                                inventory = handler.parse_entity_table(entity_walk_results, juniper_contents_results)
+                            else:
+                                inventory = handler.parse_entity_table(entity_walk_results)
+
                             # If we have a chassis with model info, prefer it over scalar OID data
                             # (e.g., Palo Alto hw_version returns revision, not model name)
                             if inventory and inventory.chassis:

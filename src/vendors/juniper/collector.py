@@ -112,6 +112,26 @@ class JuniperHandler(VendorHandler):
         "entPhysicalModelName": "1.3.6.1.2.1.47.1.1.1.1.13",
     }
 
+    # JUNIPER-MIB jnxContentsTable OIDs for FRU (Field Replaceable Unit) info
+    # These contain the actual serial numbers for modules/line cards
+    # Index: jnxContentsContainerIndex.jnxContentsL1Index.jnxContentsL2Index.jnxContentsL3Index
+    JUNIPER_CONTENTS_OIDS = {
+        "jnxContentsType": "1.3.6.1.4.1.2636.3.1.8.1.2",        # Component type OID
+        "jnxContentsDescr": "1.3.6.1.4.1.2636.3.1.8.1.6",       # Description
+        "jnxContentsSerialNo": "1.3.6.1.4.1.2636.3.1.8.1.7",    # Serial number
+        "jnxContentsRevision": "1.3.6.1.4.1.2636.3.1.8.1.8",    # Hardware revision
+        "jnxContentsPartNo": "1.3.6.1.4.1.2636.3.1.8.1.10",     # Part number (model)
+        "jnxContentsChassisId": "1.3.6.1.4.1.2636.3.1.8.1.12",  # Chassis ID
+        "jnxContentsChassisDescr": "1.3.6.1.4.1.2636.3.1.8.1.13",  # Chassis description
+    }
+
+    # JUNIPER-MIB jnxFruTable for FRU state info (optional, for status)
+    JUNIPER_FRU_OIDS = {
+        "jnxFruName": "1.3.6.1.4.1.2636.3.1.15.1.5",           # FRU name
+        "jnxFruType": "1.3.6.1.4.1.2636.3.1.15.1.6",           # FRU type
+        "jnxFruState": "1.3.6.1.4.1.2636.3.1.15.1.8",          # FRU state (online/offline/etc)
+    }
+
     # Known Juniper model patterns from sysObjectID
     # Format: 1.3.6.1.4.1.2636.1.1.1.2.MODEL_ID
     # Based on JUNIPER-CHASSIS-DEFINES-MIB
@@ -482,14 +502,20 @@ class JuniperHandler(VendorHandler):
         """Return Entity MIB OID bases for walking."""
         return self.ENTITY_MIB_OIDS.copy()
 
+    def get_juniper_contents_oids(self) -> dict[str, str]:
+        """Return Juniper jnxContentsTable OID bases for walking."""
+        return self.JUNIPER_CONTENTS_OIDS.copy()
+
     def parse_entity_table(
-        self, walk_results: dict[str, list[tuple[str, str]]]
+        self, walk_results: dict[str, list[tuple[str, str]]],
+        juniper_contents: dict[str, list[tuple[str, str]]] | None = None
     ) -> DeviceInventory:
         """
         Parse Entity MIB walk results into structured inventory.
 
         Args:
             walk_results: Dict mapping OID name to list of (full_oid, value) tuples
+            juniper_contents: Optional dict with jnxContentsTable data for real FRU serial numbers
 
         Returns:
             DeviceInventory with categorized components
@@ -560,7 +586,136 @@ class JuniperHandler(VendorHandler):
             elif comp.entity_class == 7:  # Fan
                 inventory.fans.append(comp)
 
+        # Merge Juniper jnxContentsTable data for real FRU serial numbers
+        if juniper_contents:
+            self._merge_juniper_contents(inventory, juniper_contents)
+
         return inventory
+
+    def _merge_juniper_contents(
+        self,
+        inventory: DeviceInventory,
+        juniper_contents: dict[str, list[tuple[str, str]]]
+    ) -> None:
+        """
+        Merge Juniper jnxContentsTable data into the inventory.
+
+        jnxContentsTable has the real serial numbers for FRUs (line cards, power supplies, etc.)
+        that Entity MIB often shows as "BUILTIN".
+
+        Index format: containerIndex.l1Index.l2Index.l3Index (4-level hierarchy)
+        """
+        # Build a dict of FRU components from jnxContentsTable
+        # Key: full index string (e.g., "1.1.0.0"), Value: component data
+        fru_components: dict[str, dict[str, Any]] = {}
+
+        def get_full_index(oid: str, base_oid: str) -> str | None:
+            """Extract the full 4-part index from the OID."""
+            suffix = oid.replace(base_oid + ".", "")
+            parts = suffix.split(".")
+            if len(parts) >= 4:
+                return ".".join(parts[:4])
+            return None
+
+        # Parse jnxContentsTable data
+        for oid_name, results in juniper_contents.items():
+            base_oid = self.JUNIPER_CONTENTS_OIDS.get(oid_name)
+            if not base_oid:
+                continue
+
+            for full_oid, value in results:
+                idx = get_full_index(full_oid, base_oid)
+                if idx is None:
+                    continue
+
+                if idx not in fru_components:
+                    fru_components[idx] = {"index": idx}
+
+                value_str = str(value).strip() if value else None
+                # Skip empty or placeholder values
+                if not value_str or value_str.lower() in ("", "builtin", "n/a"):
+                    continue
+
+                if oid_name == "jnxContentsDescr":
+                    fru_components[idx]["description"] = value_str
+                elif oid_name == "jnxContentsSerialNo":
+                    fru_components[idx]["serial_number"] = value_str
+                elif oid_name == "jnxContentsRevision":
+                    fru_components[idx]["hardware_rev"] = value_str
+                elif oid_name == "jnxContentsPartNo":
+                    fru_components[idx]["model_name"] = value_str
+
+        # Now try to match FRU data to existing inventory components
+        # Match by description or name similarity
+        for fru_idx, fru_data in fru_components.items():
+            # Skip entries without serial numbers
+            fru_serial = fru_data.get("serial_number")
+            if not fru_serial:
+                continue
+
+            fru_desc = fru_data.get("description", "").lower()
+            fru_model = fru_data.get("model_name", "")
+            matched = False
+
+            # Try to match to existing modules
+            for module in inventory.modules:
+                # Check if module serial is BUILTIN or missing
+                if module.serial_number and module.serial_number.lower() not in ("builtin", ""):
+                    continue  # Already has a real serial
+
+                # Match by description similarity
+                module_desc = (module.description or "").lower()
+                module_name = (module.name or "").lower()
+
+                # Check for description match
+                if fru_desc and (fru_desc in module_desc or module_desc in fru_desc):
+                    module.serial_number = fru_serial
+                    if fru_model and not module.model_name:
+                        module.model_name = fru_model
+                    if fru_data.get("hardware_rev"):
+                        module.hardware_rev = fru_data["hardware_rev"]
+                    matched = True
+                    break
+
+                # Check for name match
+                if fru_desc and (fru_desc in module_name or module_name in fru_desc):
+                    module.serial_number = fru_serial
+                    if fru_model and not module.model_name:
+                        module.model_name = fru_model
+                    if fru_data.get("hardware_rev"):
+                        module.hardware_rev = fru_data["hardware_rev"]
+                    matched = True
+                    break
+
+            # Try to match to power supplies
+            if not matched:
+                for psu in inventory.power_supplies:
+                    if psu.serial_number and psu.serial_number.lower() not in ("builtin", ""):
+                        continue
+
+                    psu_desc = (psu.description or "").lower()
+                    psu_name = (psu.name or "").lower()
+
+                    if "power" in fru_desc or "psu" in fru_desc or "pem" in fru_desc:
+                        if fru_desc in psu_desc or psu_desc in fru_desc or fru_desc in psu_name:
+                            psu.serial_number = fru_serial
+                            if fru_model and not psu.model_name:
+                                psu.model_name = fru_model
+                            matched = True
+                            break
+
+            # If not matched to existing, add as new module if it has enough info
+            if not matched and fru_serial and fru_data.get("description"):
+                # Create a new module entry
+                new_module = EntityComponent(
+                    index=hash(fru_idx) % 100000,  # Generate a unique index
+                    description=fru_data.get("description"),
+                    serial_number=fru_serial,
+                    model_name=fru_model or None,
+                    hardware_rev=fru_data.get("hardware_rev"),
+                    entity_class=9,  # Module
+                )
+                inventory.modules.append(new_module)
 
     def parse_basic_info_from_entity_walk(
         self, walk_results: dict[str, list[tuple[str, str]]], sys_descr: str | None = None
