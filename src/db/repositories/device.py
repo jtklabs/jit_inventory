@@ -4,7 +4,7 @@ Device repository for database operations.
 from datetime import datetime
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from src.db.models import Device
 
@@ -33,7 +33,7 @@ class DeviceRepository:
         offset: int = 0,
     ) -> list[Device]:
         """Get all devices with optional filtering."""
-        stmt = select(Device)
+        stmt = select(Device).options(joinedload(Device.nautobot_sync))
 
         if vendor:
             stmt = stmt.where(Device.vendor == vendor)
@@ -43,7 +43,7 @@ class DeviceRepository:
             stmt = stmt.where(Device.is_active == is_active)
 
         stmt = stmt.order_by(Device.last_seen.desc()).offset(offset).limit(limit)
-        return list(self.session.execute(stmt).scalars().all())
+        return list(self.session.execute(stmt).scalars().unique().all())
 
     def count(
         self,
@@ -134,6 +134,20 @@ class DeviceRepository:
         """Delete a device."""
         self.session.delete(device)
         self.session.flush()
+
+    def set_inactive(self, ip_address: str) -> bool:
+        """
+        Mark a device as inactive (offline).
+
+        Returns True if device was found and updated, False otherwise.
+        """
+        device = self.get_by_ip(ip_address)
+        if device is None:
+            return False
+
+        device.is_active = False
+        self.session.flush()
+        return True
 
     def get_vendors(self) -> list[str]:
         """Get list of distinct vendors, sorted alphabetically."""

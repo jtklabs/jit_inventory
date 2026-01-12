@@ -21,32 +21,36 @@ from src.core.job_tracker import get_job_tracker
 from src.core.scanner import DeviceScanner
 from src.credentials import get_credential_provider
 from src.credentials.models import SNMPv2cProfile, SNMPv3Profile
-from src.db.connection import get_db_session
+from src.db.connection import get_db_session, init_db
 from src.db.repositories.device import DeviceRepository
 from src.db.repositories.scan import ScanHistoryRepository
+from src.db.repositories.nautobot_sync import NautobotSyncRepository
 from src.scheduler import get_scheduler
 from src.snmp.client import AuthProtocol, PrivProtocol
 
 app = Flask(__name__)
 app.secret_key = "dev-secret-key-change-in-production"
 
-# Initialize scheduler on app startup
-_scheduler_initialized = False
+# Initialize database and scheduler on app startup
+_app_initialized = False
 
 
-def init_scheduler():
-    """Initialize the scheduler (called once on first request)."""
-    global _scheduler_initialized
-    if not _scheduler_initialized:
+def init_app():
+    """Initialize the app (database, scheduler) - called once on first request."""
+    global _app_initialized
+    if not _app_initialized:
+        # Initialize database tables
+        init_db()
+        # Start scheduler
         scheduler = get_scheduler()
         scheduler.start()
-        _scheduler_initialized = True
+        _app_initialized = True
 
 
 @app.before_request
 def before_request():
     """Run before each request."""
-    init_scheduler()
+    init_app()
 
 
 def run_async(coro):
@@ -921,6 +925,465 @@ def refresh_selected_devices():
     thread.start()
 
     return jsonify({"success": True, "job_id": job.id, "device_count": len(device_ips)})
+
+
+# ============== Nautobot Integration ==============
+
+def get_nautobot_client():
+    """Get a Nautobot client if configured, otherwise return None."""
+    settings = get_settings()
+    if not settings.nautobot_url or not settings.nautobot_token:
+        return None
+    from src.integrations.nautobot.client import NautobotClient
+    return NautobotClient()
+
+
+@app.route("/nautobot")
+def nautobot_dashboard():
+    """Nautobot integration dashboard."""
+    settings = get_settings()
+    configured = bool(settings.nautobot_url and settings.nautobot_token)
+    connected = False
+    connection_error = None
+    stats = {
+        "total": 0,
+        "pending": 0,
+        "no_prefix": 0,
+        "no_location": 0,
+        "ready": 0,
+        "synced": 0,
+        "failed": 0,
+    }
+
+    if configured:
+        try:
+            client = get_nautobot_client()
+            connected = client.test_connection()
+        except Exception as e:
+            connection_error = str(e)
+
+        # Get device stats
+        try:
+            with get_db_session() as session:
+                device_repo = DeviceRepository(session)
+                sync_repo = NautobotSyncRepository(session)
+                stats["total"] = device_repo.count()
+                status_counts = sync_repo.count_by_status()
+                stats.update(status_counts)
+        except Exception as e:
+            flash(f"Database error: {e}", "warning")
+
+    return render_template(
+        "nautobot/dashboard.html",
+        configured=configured,
+        connected=connected,
+        connection_error=connection_error,
+        stats=stats,
+        nautobot_url=settings.nautobot_url,
+    )
+
+
+@app.route("/nautobot/test-connection", methods=["POST"])
+def nautobot_test_connection():
+    """Test Nautobot API connection."""
+    try:
+        client = get_nautobot_client()
+        if not client:
+            return jsonify({"success": False, "error": "Nautobot not configured"})
+
+        if client.test_connection():
+            return jsonify({"success": True, "message": "Connection successful"})
+        else:
+            return jsonify({"success": False, "error": "Connection failed"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/nautobot/status")
+def nautobot_status():
+    """Get Nautobot integration status as JSON."""
+    settings = get_settings()
+    configured = bool(settings.nautobot_url and settings.nautobot_token)
+
+    result = {
+        "configured": configured,
+        "connected": False,
+        "stats": {
+            "total": 0,
+            "pending": 0,
+            "no_prefix": 0,
+            "no_location": 0,
+            "ready": 0,
+            "synced": 0,
+            "failed": 0,
+        }
+    }
+
+    if configured:
+        try:
+            client = get_nautobot_client()
+            result["connected"] = client.test_connection()
+        except:
+            pass
+
+        try:
+            with get_db_session() as session:
+                device_repo = DeviceRepository(session)
+                sync_repo = NautobotSyncRepository(session)
+                result["stats"]["total"] = device_repo.count()
+                result["stats"].update(sync_repo.count_by_status())
+        except:
+            pass
+
+    return jsonify(result)
+
+
+@app.route("/nautobot/check-location-status", methods=["POST"])
+def nautobot_check_location_status():
+    """Check location status for selected devices."""
+    data = request.get_json()
+    device_ids = data.get("device_ids", [])
+
+    if not device_ids:
+        return jsonify({"error": "No devices selected"}), 400
+
+    client = get_nautobot_client()
+    if not client:
+        return jsonify({"error": "Nautobot not configured"}), 400
+
+    from src.integrations.nautobot.sync import NautobotSyncService
+
+    results = []
+    try:
+        sync_service = NautobotSyncService(client)
+        with get_db_session() as session:
+            device_repo = DeviceRepository(session)
+            sync_repo = NautobotSyncRepository(session)
+
+            for device_id in device_ids:
+                device = device_repo.get_by_id(device_id)
+                if not device:
+                    continue
+
+                try:
+                    status = sync_service.check_device_location_status(device)
+
+                    # Update sync status in DB
+                    if not status.has_prefix:
+                        sync_repo.mark_no_prefix(device_id)
+                        sync_status = "no_prefix"
+                    elif not status.has_location:
+                        sync_repo.mark_no_location(device_id, status.prefix_id)
+                        sync_status = "no_location"
+                    else:
+                        sync_repo.mark_ready(device_id, status.prefix_id)
+                        sync_status = "ready"
+
+                    results.append({
+                        "device_id": device_id,
+                        "ip_address": str(device.ip_address),
+                        "status": sync_status,
+                        "prefix": status.prefix_cidr,
+                        "location": status.location_name,
+                    })
+                except Exception as e:
+                    results.append({
+                        "device_id": device_id,
+                        "ip_address": str(device.ip_address),
+                        "status": "error",
+                        "error": str(e),
+                    })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({"results": results})
+
+
+@app.route("/nautobot/ensure-prefixes", methods=["POST"])
+def nautobot_ensure_prefixes():
+    """Create missing prefixes/IPs in Nautobot for selected devices."""
+    data = request.get_json()
+    device_ids = data.get("device_ids", [])
+
+    if not device_ids:
+        return jsonify({"error": "No devices selected"}), 400
+
+    client = get_nautobot_client()
+    if not client:
+        return jsonify({"error": "Nautobot not configured"}), 400
+
+    from src.integrations.nautobot.sync import NautobotSyncService
+
+    results = {"created_prefixes": 0, "created_ips": 0, "errors": []}
+
+    try:
+        sync_service = NautobotSyncService(client)
+        with get_db_session() as session:
+            device_repo = DeviceRepository(session)
+            sync_repo = NautobotSyncRepository(session)
+
+            for device_id in device_ids:
+                device = device_repo.get_by_id(device_id)
+                if not device:
+                    continue
+
+                try:
+                    result = sync_service.ensure_prefix_and_ip(device)
+                    if result.success:
+                        if result.created_prefix:
+                            results["created_prefixes"] += 1
+                        if result.created_ip:
+                            results["created_ips"] += 1
+
+                        # Update sync status - now has prefix but need to check location
+                        status = sync_service.check_device_location_status(device)
+                        if status.has_location:
+                            sync_repo.mark_ready(device_id, result.prefix_id)
+                        else:
+                            sync_repo.mark_no_location(device_id, result.prefix_id)
+                    else:
+                        results["errors"].append({
+                            "ip": str(device.ip_address),
+                            "error": result.error,
+                        })
+                except Exception as e:
+                    results["errors"].append({
+                        "ip": str(device.ip_address),
+                        "error": str(e),
+                    })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify(results)
+
+
+@app.route("/nautobot/sync", methods=["POST"])
+def nautobot_sync_devices():
+    """Sync selected devices to Nautobot."""
+    data = request.get_json()
+    device_ids = data.get("device_ids", [])
+
+    if not device_ids:
+        return jsonify({"error": "No devices selected"}), 400
+
+    client = get_nautobot_client()
+    if not client:
+        return jsonify({"error": "Nautobot not configured"}), 400
+
+    from src.integrations.nautobot.sync import NautobotSyncService
+
+    results = {"synced": 0, "skipped": 0, "failed": 0, "errors": []}
+
+    try:
+        sync_service = NautobotSyncService(client)
+        with get_db_session() as session:
+            device_repo = DeviceRepository(session)
+            sync_repo = NautobotSyncRepository(session)
+
+            for device_id in device_ids:
+                device = device_repo.get_by_id(device_id)
+                if not device:
+                    continue
+
+                try:
+                    result = sync_service.sync_device(device)
+
+                    if result.status == "synced":
+                        sync_repo.mark_synced(device_id, result.nautobot_device_id)
+                        results["synced"] += 1
+                    elif result.status in ("no_prefix", "no_location"):
+                        results["skipped"] += 1
+                        if result.status == "no_prefix":
+                            sync_repo.mark_no_prefix(device_id)
+                        else:
+                            sync_repo.mark_no_location(device_id)
+                    else:
+                        sync_repo.mark_failed(device_id, result.error or "Unknown error")
+                        results["failed"] += 1
+                        results["errors"].append({
+                            "ip": str(device.ip_address),
+                            "error": result.error,
+                        })
+                except Exception as e:
+                    sync_repo.mark_failed(device_id, str(e))
+                    results["failed"] += 1
+                    results["errors"].append({
+                        "ip": str(device.ip_address),
+                        "error": str(e),
+                    })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify(results)
+
+
+@app.route("/nautobot/sync-all", methods=["POST"])
+def nautobot_sync_all_ready():
+    """Sync all devices that are ready (have location) to Nautobot."""
+    import threading
+
+    client = get_nautobot_client()
+    if not client:
+        flash("Nautobot not configured", "danger")
+        return redirect(url_for("nautobot_dashboard"))
+
+    # Get count of ready devices
+    ready_count = 0
+    try:
+        with get_db_session() as session:
+            sync_repo = NautobotSyncRepository(session)
+            devices = sync_repo.get_devices_by_status("ready", limit=10000)
+            ready_count = len(devices)
+    except Exception as e:
+        flash(f"Database error: {e}", "danger")
+        return redirect(url_for("nautobot_dashboard"))
+
+    if ready_count == 0:
+        flash("No devices are ready to sync. Make sure prefixes have locations assigned in Nautobot.", "warning")
+        return redirect(url_for("nautobot_dashboard"))
+
+    # Create job tracker entry
+    job_tracker = get_job_tracker()
+    job = job_tracker.create_job(
+        job_type="nautobot_sync",
+        total_targets=ready_count,
+        metadata={"description": "Sync ready devices to Nautobot"}
+    )
+
+    def run_sync(job_id: str):
+        """Background task to sync devices."""
+        from src.integrations.nautobot.sync import NautobotSyncService
+
+        job_tracker = get_job_tracker()
+        job_tracker.start_job(job_id)
+
+        try:
+            client = get_nautobot_client()
+            sync_service = NautobotSyncService(client)
+
+            with get_db_session() as session:
+                sync_repo = NautobotSyncRepository(session)
+                device_repo = DeviceRepository(session)
+                devices = sync_repo.get_devices_by_status("ready", limit=10000)
+
+                for device in devices:
+                    if job_tracker.is_cancelled(job_id):
+                        break
+
+                    try:
+                        result = sync_service.sync_device(device)
+                        if result.status == "synced":
+                            sync_repo.mark_synced(str(device.id), result.nautobot_device_id)
+                            job_tracker.update_progress(job_id, success=True)
+                        else:
+                            if result.error:
+                                sync_repo.mark_failed(str(device.id), result.error)
+                            job_tracker.update_progress(job_id, success=False)
+                    except Exception as e:
+                        sync_repo.mark_failed(str(device.id), str(e))
+                        job_tracker.update_progress(job_id, success=False)
+
+            if not job_tracker.is_cancelled(job_id):
+                job_tracker.complete_job(job_id)
+        except Exception as e:
+            if not job_tracker.is_cancelled(job_id):
+                job_tracker.complete_job(job_id, error=str(e))
+
+    # Run in background thread
+    thread = threading.Thread(target=run_sync, args=(job.id,))
+    thread.start()
+
+    flash(f"Nautobot sync started for {ready_count} devices. Check Batch Scan page for progress.", "info")
+    return redirect(url_for("nautobot_dashboard"))
+
+
+@app.route("/nautobot/refresh-status", methods=["POST"])
+def nautobot_refresh_status():
+    """Refresh location status for all devices from Nautobot."""
+    import threading
+
+    client = get_nautobot_client()
+    if not client:
+        flash("Nautobot not configured", "danger")
+        return redirect(url_for("nautobot_dashboard"))
+
+    # Get count of devices
+    device_count = 0
+    try:
+        with get_db_session() as session:
+            device_repo = DeviceRepository(session)
+            device_count = device_repo.count()
+    except Exception as e:
+        flash(f"Database error: {e}", "danger")
+        return redirect(url_for("nautobot_dashboard"))
+
+    if device_count == 0:
+        flash("No devices in inventory", "warning")
+        return redirect(url_for("nautobot_dashboard"))
+
+    # Create job tracker entry
+    job_tracker = get_job_tracker()
+    job = job_tracker.create_job(
+        job_type="nautobot_status_check",
+        total_targets=device_count,
+        metadata={"description": "Check Nautobot location status for all devices"}
+    )
+
+    def run_status_check(job_id: str):
+        """Background task to check location status."""
+        from src.integrations.nautobot.sync import NautobotSyncService
+
+        job_tracker = get_job_tracker()
+        job_tracker.start_job(job_id)
+
+        try:
+            client = get_nautobot_client()
+            sync_service = NautobotSyncService(client)
+
+            with get_db_session() as session:
+                device_repo = DeviceRepository(session)
+                sync_repo = NautobotSyncRepository(session)
+                devices = device_repo.get_all(limit=10000)
+
+                for device in devices:
+                    if job_tracker.is_cancelled(job_id):
+                        break
+
+                    try:
+                        # Skip already synced devices
+                        if device.nautobot_sync and device.nautobot_sync.sync_status == "synced":
+                            job_tracker.update_progress(job_id, success=True)
+                            continue
+
+                        status = sync_service.check_device_location_status(device)
+
+                        if not status.has_prefix:
+                            sync_repo.mark_no_prefix(str(device.id))
+                        elif not status.has_location:
+                            sync_repo.mark_no_location(str(device.id), status.prefix_id)
+                        else:
+                            sync_repo.mark_ready(str(device.id), status.prefix_id)
+
+                        job_tracker.update_progress(job_id, success=True)
+                    except Exception as e:
+                        sync_repo.mark_failed(str(device.id), str(e))
+                        job_tracker.update_progress(job_id, success=False)
+
+            if not job_tracker.is_cancelled(job_id):
+                job_tracker.complete_job(job_id)
+        except Exception as e:
+            if not job_tracker.is_cancelled(job_id):
+                job_tracker.complete_job(job_id, error=str(e))
+
+    # Run in background thread
+    thread = threading.Thread(target=run_status_check, args=(job.id,))
+    thread.start()
+
+    flash(f"Status check started for {device_count} devices. Check Batch Scan page for progress.", "info")
+    return redirect(url_for("nautobot_dashboard"))
 
 
 if __name__ == "__main__":

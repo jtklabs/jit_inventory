@@ -44,9 +44,14 @@ class Device(Base):
     metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB)
     # Associated credential profile that works for this device
     credential_profile_name: Mapped[str | None] = mapped_column(String(255))
+    # Management subnet in CIDR notation (e.g., "10.1.5.0/24")
+    management_subnet: Mapped[str | None] = mapped_column(String(50))
 
     scan_history: Mapped[list["ScanHistory"]] = relationship(
         back_populates="device", cascade="all, delete-orphan"
+    )
+    nautobot_sync: Mapped["NautobotSyncStatus | None"] = relationship(
+        back_populates="device", uselist=False, cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
@@ -216,3 +221,28 @@ class CredentialProfile(Base):
 
     def __repr__(self) -> str:
         return f"<CredentialProfile {self.name} ({self.snmp_version})>"
+
+
+class NautobotSyncStatus(Base):
+    """Tracks sync status between local devices and Nautobot."""
+
+    __tablename__ = "nautobot_sync_status"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    device_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("devices.id", ondelete="CASCADE"), unique=True
+    )
+    nautobot_device_id: Mapped[str | None] = mapped_column(String(255))
+    nautobot_ip_id: Mapped[str | None] = mapped_column(String(255))
+    nautobot_prefix_id: Mapped[str | None] = mapped_column(String(255))
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Status: pending, no_prefix, no_location, ready, synced, failed
+    sync_status: Mapped[str] = mapped_column(String(50), default="pending")
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+    device: Mapped[Device] = relationship(back_populates="nautobot_sync")
+
+    def __repr__(self) -> str:
+        return f"<NautobotSyncStatus {self.device_id} ({self.sync_status})>"

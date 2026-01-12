@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     rescan_interval_hours: int = 24  # How often to rescan all devices
     rescan_max_concurrent: int = 5  # Max concurrent rescans
 
+    # Nautobot integration
+    nautobot_url: str | None = None
+    nautobot_token: str | None = None
+    nautobot_verify_ssl: bool = True
+    nautobot_tag_name: str = "Nova Inventory"
+
 
 @lru_cache
 def get_settings() -> Settings:

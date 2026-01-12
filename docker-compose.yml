@@ -1,6 +1,23 @@
 version: '3.8'
 
 services:
+  db:
+    image: postgres:15-alpine
+    container_name: jt-inventory-db
+    environment:
+      POSTGRES_USER: inventory
+      POSTGRES_PASSWORD: inventory_pass
+      POSTGRES_DB: inventory
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inventory -d inventory"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   app:
     build:
       context: .
@@ -9,11 +26,22 @@ services:
     ports:
       - "8081:5000"
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql://inventory:inventory_pass@localhost:5432/inventory}
+      - DATABASE_URL=postgresql://inventory:inventory_pass@db:5432/inventory
       - CREDENTIAL_BACKEND=local
       - CREDENTIAL_PATH=/app/data/credentials
       - LOG_LEVEL=INFO
+      # Nautobot Integration
+      - NAUTOBOT_URL=${NAUTOBOT_URL}
+      - NAUTOBOT_TOKEN=${NAUTOBOT_TOKEN}
+      - NAUTOBOT_VERIFY_SSL=${NAUTOBOT_VERIFY_SSL:-true}
+      - NAUTOBOT_TAG_NAME=${NAUTOBOT_TAG_NAME:-Nova Inventory}
     volumes:
       - ./src:/app/src
       - ./data/credentials:/app/data/credentials
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  postgres_data:

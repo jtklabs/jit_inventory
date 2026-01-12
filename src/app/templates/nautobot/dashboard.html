@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+
+{% block title %}Nautobot Integration - JIT Inventory{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-cloud-upload"></i> Nautobot Integration</h2>
+</div>
+
+<!-- Connection Status -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-plug"></i> Connection Status</h5>
+            </div>
+            <div class="card-body">
+                {% if not configured %}
+                    <div class="alert alert-warning mb-0">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <strong>Not Configured</strong> - Set NAUTOBOT_URL and NAUTOBOT_TOKEN in your .env file.
+                    </div>
+                {% elif connected %}
+                    <div class="d-flex align-items-center">
+                        <span class="badge bg-success fs-6 me-3">
+                            <i class="bi bi-check-circle"></i> Connected
+                        </span>
+                        <span class="text-muted">{{ nautobot_url }}</span>
+                        <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="testConnection()">
+                            <i class="bi bi-arrow-clockwise"></i> Test Connection
+                        </button>
+                    </div>
+                {% else %}
+                    <div class="alert alert-danger mb-3">
+                        <i class="bi bi-x-circle"></i>
+                        <strong>Connection Failed</strong>
+                        {% if connection_error %} - {{ connection_error }}{% endif %}
+                    </div>
+                    <p class="text-muted mb-0">URL: {{ nautobot_url }}</p>
+                    <button class="btn btn-sm btn-outline-primary mt-2" onclick="testConnection()">
+                        <i class="bi bi-arrow-clockwise"></i> Retry Connection
+                    </button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if configured %}
+<!-- Stats Cards -->
+<div class="row mb-4">
+    <div class="col-md-2">
+        <div class="card stat-card primary h-100">
+            <div class="card-body text-center">
+                <h3 class="mb-0">{{ stats.total }}</h3>
+                <small class="text-muted">Total Devices</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card warning h-100">
+            <div class="card-body text-center">
+                <h3 class="mb-0">{{ stats.pending }}</h3>
+                <small class="text-muted">Pending Check</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card danger h-100">
+            <div class="card-body text-center">
+                <h3 class="mb-0">{{ stats.no_prefix }}</h3>
+                <small class="text-muted">No Prefix</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card warning h-100">
+            <div class="card-body text-center">
+                <h3 class="mb-0">{{ stats.no_location }}</h3>
+                <small class="text-muted">No Location</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card primary h-100">
+            <div class="card-body text-center">
+                <h3 class="mb-0">{{ stats.ready }}</h3>
+                <small class="text-muted">Ready to Sync</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card success h-100">
+            <div class="card-body text-center">
+                <h3 class="mb-0">{{ stats.synced }}</h3>
+                <small class="text-muted">Synced</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Actions -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-lightning"></i> Quick Actions</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="card bg-light h-100">
+                            <div class="card-body">
+                                <h6><i class="bi bi-search"></i> Check Location Status</h6>
+                                <p class="small text-muted mb-3">
+                                    Query Nautobot to check which devices have prefixes with locations assigned.
+                                </p>
+                                <form method="POST" action="{{ url_for('nautobot_refresh_status') }}">
+                                    <button type="submit" class="btn btn-primary" {% if not connected %}disabled{% endif %}>
+                                        <i class="bi bi-arrow-clockwise"></i> Refresh All Status
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-light h-100">
+                            <div class="card-body">
+                                <h6><i class="bi bi-plus-circle"></i> Create Missing Prefixes</h6>
+                                <p class="small text-muted mb-3">
+                                    Create prefixes in Nautobot for devices that don't have one. Go to Inventory to select devices.
+                                </p>
+                                <a href="{{ url_for('inventory') }}" class="btn btn-outline-primary">
+                                    <i class="bi bi-box-seam"></i> Go to Inventory
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-light h-100">
+                            <div class="card-body">
+                                <h6><i class="bi bi-cloud-upload"></i> Sync Ready Devices</h6>
+                                <p class="small text-muted mb-3">
+                                    Sync all devices that have prefixes with locations assigned to Nautobot.
+                                </p>
+                                <form method="POST" action="{{ url_for('nautobot_sync_all_ready') }}">
+                                    <button type="submit" class="btn btn-success" {% if not connected or stats.ready == 0 %}disabled{% endif %}>
+                                        <i class="bi bi-cloud-upload"></i> Sync {{ stats.ready }} Ready Devices
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Status Legend -->
+<div class="row">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-info-circle"></i> Sync Status Guide</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Meaning</th>
+                            <th>Action Required</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="badge bg-secondary">Pending</span></td>
+                            <td>Device hasn't been checked against Nautobot yet</td>
+                            <td>Click "Refresh All Status" to check</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge bg-danger">No Prefix</span></td>
+                            <td>Device IP is not in any Nautobot prefix</td>
+                            <td>Select devices in Inventory and click "Create Prefixes in Nautobot"</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge bg-warning text-dark">No Location</span></td>
+                            <td>Prefix exists but has no location assigned</td>
+                            <td>Assign a location to the prefix in Nautobot</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge bg-primary">Ready</span></td>
+                            <td>Prefix has location, device can be synced</td>
+                            <td>Click "Sync Ready Devices" or sync from Inventory</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge bg-success">Synced</span></td>
+                            <td>Device exists in Nautobot</td>
+                            <td>None - device is synced!</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<script>
+function testConnection() {
+    const btn = event.target;
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Testing...';
+
+    fetch('/nautobot/test-connection', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Connection successful!');
+            } else {
+                alert('Connection failed: ' + (data.error || 'Unknown error'));
+            }
+            location.reload();
+        })
+        .catch(err => {
+            alert('Error: ' + err);
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        });
+}
+</script>
+{% endblock %}

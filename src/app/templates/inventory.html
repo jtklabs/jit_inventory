@@ -9,6 +9,16 @@
         <button type="button" class="btn btn-outline-success me-2" id="refreshSelectedBtn" style="display: none;" onclick="refreshSelectedDevices()">
             <i class="bi bi-arrow-clockwise"></i> Refresh Selected (<span id="selectedCount">0</span>)
         </button>
+        <div class="btn-group me-2" id="nautobotActionsBtn" style="display: none;">
+            <button type="button" class="btn btn-outline-info dropdown-toggle" data-bs-toggle="dropdown">
+                <i class="bi bi-cloud-upload"></i> Nautobot Actions
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="#" onclick="nautobotCheckStatus()"><i class="bi bi-search"></i> Check Status</a></li>
+                <li><a class="dropdown-item" href="#" onclick="nautobotCreatePrefixes()"><i class="bi bi-plus-circle"></i> Create Prefixes</a></li>
+                <li><a class="dropdown-item" href="#" onclick="nautobotSyncDevices()"><i class="bi bi-cloud-upload"></i> Sync to Nautobot</a></li>
+            </ul>
+        </div>
         <form method="POST" action="{{ url_for('refresh_all_devices') }}" class="d-inline">
             <button type="submit" class="btn btn-outline-primary me-2" onclick="this.disabled=true; this.innerHTML='<span class=\'spinner-border spinner-border-sm\'></span> Refreshing...'; this.form.submit();">
                 <i class="bi bi-arrow-clockwise"></i> Refresh All
@@ -101,6 +111,7 @@
                             <th>Version</th>
                             <th>Last Seen</th>
                             <th>Status</th>
+                            <th>Nautobot</th>
                         </tr>
                     </thead>
                     <tbody id="devicesTableBody">
@@ -123,6 +134,25 @@
                                         <span class="badge bg-success">Active</span>
                                     {% else %}
                                         <span class="badge bg-secondary">Inactive</span>
+                                    {% endif %}
+                                </td>
+                                <td style="cursor: pointer;" onclick="window.location='{{ url_for('device_detail', device_id=device.id) }}'">
+                                    {% if device.nautobot_sync %}
+                                        {% if device.nautobot_sync.sync_status == 'synced' %}
+                                            <span class="badge bg-success" title="Synced to Nautobot"><i class="bi bi-check-circle"></i></span>
+                                        {% elif device.nautobot_sync.sync_status == 'ready' %}
+                                            <span class="badge bg-primary" title="Ready to sync"><i class="bi bi-arrow-up-circle"></i></span>
+                                        {% elif device.nautobot_sync.sync_status == 'no_location' %}
+                                            <span class="badge bg-warning text-dark" title="Prefix has no location"><i class="bi bi-geo-alt"></i></span>
+                                        {% elif device.nautobot_sync.sync_status == 'no_prefix' %}
+                                            <span class="badge bg-danger" title="No prefix in Nautobot"><i class="bi bi-x-circle"></i></span>
+                                        {% elif device.nautobot_sync.sync_status == 'failed' %}
+                                            <span class="badge bg-danger" title="Sync failed: {{ device.nautobot_sync.error_message }}"><i class="bi bi-exclamation-triangle"></i></span>
+                                        {% else %}
+                                            <span class="badge bg-secondary" title="Pending"><i class="bi bi-clock"></i></span>
+                                        {% endif %}
+                                    {% else %}
+                                        <span class="badge bg-secondary" title="Not checked"><i class="bi bi-question-circle"></i></span>
                                     {% endif %}
                                 </td>
                             </tr>
@@ -179,6 +209,7 @@ function updateSelectedCount() {
     const count = checkedBoxes.length;
     document.getElementById('selectedCount').textContent = count;
     document.getElementById('refreshSelectedBtn').style.display = count > 0 ? 'inline-block' : 'none';
+    document.getElementById('nautobotActionsBtn').style.display = count > 0 ? 'inline-block' : 'none';
 
     // Update select all checkbox state
     const allCheckboxes = document.querySelectorAll('.device-checkbox');
@@ -355,5 +386,122 @@ function checkRunningJobs() {
 
 // Check immediately on page load
 document.addEventListener('DOMContentLoaded', checkRunningJobs);
+
+// Nautobot integration functions
+function getSelectedDeviceIds() {
+    const checkedBoxes = document.querySelectorAll('.device-checkbox:checked');
+    return Array.from(checkedBoxes).map(cb => cb.value);
+}
+
+function nautobotCheckStatus() {
+    const deviceIds = getSelectedDeviceIds();
+    if (deviceIds.length === 0) {
+        alert('No devices selected');
+        return;
+    }
+
+    if (!confirm(`Check Nautobot status for ${deviceIds.length} devices?`)) {
+        return;
+    }
+
+    fetch('/nautobot/check-location-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_ids: deviceIds })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            alert('Error: ' + data.error);
+        } else {
+            let summary = 'Status check complete:\n';
+            let counts = { no_prefix: 0, no_location: 0, ready: 0, error: 0 };
+            data.results.forEach(r => {
+                if (r.status in counts) counts[r.status]++;
+            });
+            summary += `- No Prefix: ${counts.no_prefix}\n`;
+            summary += `- No Location: ${counts.no_location}\n`;
+            summary += `- Ready: ${counts.ready}\n`;
+            if (counts.error > 0) summary += `- Errors: ${counts.error}\n`;
+            alert(summary);
+            location.reload();
+        }
+    })
+    .catch(err => alert('Error: ' + err));
+}
+
+function nautobotCreatePrefixes() {
+    const deviceIds = getSelectedDeviceIds();
+    if (deviceIds.length === 0) {
+        alert('No devices selected');
+        return;
+    }
+
+    if (!confirm(`Create prefixes in Nautobot for ${deviceIds.length} devices?\n\nThis will create missing prefixes and IP addresses in Nautobot.`)) {
+        return;
+    }
+
+    fetch('/nautobot/ensure-prefixes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_ids: deviceIds })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            alert('Error: ' + data.error);
+        } else {
+            let summary = 'Prefix creation complete:\n';
+            summary += `- Prefixes created: ${data.created_prefixes}\n`;
+            summary += `- IPs created: ${data.created_ips}\n`;
+            if (data.errors && data.errors.length > 0) {
+                summary += `- Errors: ${data.errors.length}\n`;
+                data.errors.slice(0, 3).forEach(e => {
+                    summary += `  - ${e.ip}: ${e.error}\n`;
+                });
+            }
+            alert(summary);
+            location.reload();
+        }
+    })
+    .catch(err => alert('Error: ' + err));
+}
+
+function nautobotSyncDevices() {
+    const deviceIds = getSelectedDeviceIds();
+    if (deviceIds.length === 0) {
+        alert('No devices selected');
+        return;
+    }
+
+    if (!confirm(`Sync ${deviceIds.length} devices to Nautobot?\n\nOnly devices with prefixes that have locations will be synced.`)) {
+        return;
+    }
+
+    fetch('/nautobot/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_ids: deviceIds })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            alert('Error: ' + data.error);
+        } else {
+            let summary = 'Sync complete:\n';
+            summary += `- Synced: ${data.synced}\n`;
+            summary += `- Skipped (no location): ${data.skipped}\n`;
+            summary += `- Failed: ${data.failed}\n`;
+            if (data.errors && data.errors.length > 0) {
+                data.errors.slice(0, 3).forEach(e => {
+                    summary += `  - ${e.ip}: ${e.error}\n`;
+                });
+            }
+            alert(summary);
+            location.reload();
+        }
+    })
+    .catch(err => alert('Error: ' + err));
+}
 </script>
 {% endblock %}

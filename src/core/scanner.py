@@ -496,9 +496,14 @@ class DeviceScanner:
         credential_profile_name: str | None,
         credential: SNMPCredential,
     ) -> str | None:
-        """Save failed scan to database."""
+        """Save failed scan to database and mark device as inactive."""
         try:
             with get_db_session() as session:
+                # Mark device as inactive if it exists
+                device_repo = DeviceRepository(session)
+                device_repo.set_inactive(ip_address)
+
+                # Create scan history entry
                 scan_repo = ScanHistoryRepository(session)
                 scan = scan_repo.create(
                     ip_address=ip_address,
