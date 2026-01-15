@@ -86,6 +86,21 @@ class NautobotSyncService:
         inventory = device.metadata_.get("inventory", {})
         return inventory.get("stack_members", [])
 
+    def _is_wlc_device(self, device: Device) -> bool:
+        """Check if device is a wireless controller with access points."""
+        if not device.metadata_:
+            return False
+        inventory = device.metadata_.get("inventory", {})
+        access_points = inventory.get("access_points", [])
+        return len(access_points) > 0
+
+    def _get_access_points(self, device: Device) -> list[dict]:
+        """Get access points from device inventory."""
+        if not device.metadata_:
+            return []
+        inventory = device.metadata_.get("inventory", {})
+        return inventory.get("access_points", [])
+
     def check_device_location_status(self, device: Device) -> LocationStatus:
         """
         Check if a device can be synced to Nautobot.
@@ -207,6 +222,10 @@ class NautobotSyncService:
             # Check if this is a stack device
             if self._is_stack_device(device):
                 return self._sync_stack_device(device, location_status)
+
+            # Check if this is a wireless controller with access points
+            if self._is_wlc_device(device):
+                return self._sync_wlc_device(device, location_status)
 
             # Get device mapping for non-stack device
             device_data = map_device_to_nautobot(device, location_status.location_id)
@@ -577,6 +596,150 @@ class NautobotSyncService:
                                 logger.info(f"Marked inventory item {serial} as removed")
                         except Exception as e:
                             logger.warning(f"Failed to mark item {serial} as removed: {e}")
+
+    def _sync_wlc_device(self, device: Device, location_status: LocationStatus) -> SyncResult:
+        """
+        Sync a wireless controller and its access points to Nautobot.
+
+        Creates:
+        1. The WLC device itself (if not already exists)
+        2. Individual devices for each access point registered to the controller
+        """
+        device_id = str(device.id)
+        ip_address = str(device.ip_address)
+        access_points = self._get_access_points(device)
+
+        logger.info(f"Syncing WLC {device.hostname or ip_address} with {len(access_points)} access points")
+
+        try:
+            # First sync the WLC itself as a normal device
+            device_data = map_device_to_nautobot(device, location_status.location_id)
+
+            # Get manufacturer and role for WLC
+            manufacturer_id = self.client.get_or_create_manufacturer(device_data["manufacturer"])
+            wlc_device_type_id = self.client.get_or_create_device_type(
+                manufacturer_id, device_data["model"]
+            )
+            wlc_role_id = self.client.get_or_create_role(device_data["role"])
+
+            # Ensure IP exists for the WLC
+            ip_result = self.client.get_or_create_ip_address(ip_address)
+
+            # Check if WLC already exists
+            existing_wlc = self.client.get_device_by_serial(device_data["serial"])
+
+            if existing_wlc:
+                wlc_nautobot_id = existing_wlc["id"]
+                self.client.update_device(
+                    nautobot_id=wlc_nautobot_id,
+                    name=device_data["name"],
+                    status="Active" if device.is_active else "Offline",
+                )
+            else:
+                wlc_nautobot_id = self.client.create_device(
+                    name=device_data["name"],
+                    device_type_id=wlc_device_type_id,
+                    role_id=wlc_role_id,
+                    location_id=location_status.location_id,
+                    serial=device_data["serial"],
+                    primary_ip_id=ip_result["id"],
+                )
+
+            # Get or create AP role
+            ap_role_id = self.client.get_or_create_role("Access Point")
+
+            # Sync each access point as a device
+            ap_count = 0
+            for ap in access_points:
+                ap_serial = ap.get("serial_number")
+                ap_name = ap.get("name")
+                ap_model = ap.get("model")
+                ap_ip = ap.get("ip_address")
+                ap_status = ap.get("status", "").lower()
+
+                # Skip APs without serial numbers (can't uniquely identify them)
+                if not ap_serial:
+                    logger.warning(f"Skipping AP {ap_name} - no serial number")
+                    continue
+
+                # Use AP name, or generate one from serial if missing
+                if not ap_name:
+                    ap_name = f"AP-{ap_serial}"
+
+                # Sanitize the AP name for Nautobot
+                ap_name = sanitize_nautobot_name(ap_name)
+
+                # Get or create device type for this AP model
+                ap_device_type_id = self.client.get_or_create_device_type(
+                    manufacturer_id,
+                    sanitize_nautobot_name(ap_model) if ap_model else "Unknown-AP"
+                )
+
+                # Check if AP already exists in Nautobot (by serial)
+                existing_ap = self.client.get_device_by_serial(ap_serial)
+
+                # Determine AP status for Nautobot
+                nautobot_status = "Active" if ap_status == "up" else "Offline"
+
+                if existing_ap:
+                    # Update existing AP
+                    self.client.update_device(
+                        nautobot_id=existing_ap["id"],
+                        name=ap_name,
+                        status=nautobot_status,
+                    )
+                else:
+                    # Check if device exists by name (serial may have changed = hardware replacement)
+                    existing_by_name = self.client.get_device_by_name(ap_name)
+                    if existing_by_name:
+                        # Rename old AP to preserve history
+                        decom_date = datetime.now().strftime("%Y-%m-%d")
+                        decom_name = f"DECOM-{ap_name}-{decom_date}"
+                        self.client.update_device(
+                            nautobot_id=existing_by_name["id"],
+                            name=decom_name,
+                            status="Offline",
+                        )
+                        logger.info(f"Renamed old AP to {decom_name} (hardware replacement)")
+
+                    # Create AP IP if it has one
+                    ap_ip_id = None
+                    if ap_ip:
+                        try:
+                            ap_ip_result = self.client.get_or_create_ip_address(ap_ip)
+                            ap_ip_id = ap_ip_result["id"]
+                        except Exception as e:
+                            logger.warning(f"Failed to create IP for AP {ap_name}: {e}")
+
+                    # Create the AP device
+                    self.client.create_device(
+                        name=ap_name,
+                        device_type_id=ap_device_type_id,
+                        role_id=ap_role_id,
+                        location_id=location_status.location_id,
+                        serial=ap_serial,
+                        primary_ip_id=ap_ip_id,
+                    )
+
+                ap_count += 1
+
+            logger.info(f"Successfully synced WLC with {ap_count} access points")
+
+            return SyncResult(
+                success=True,
+                device_id=device_id,
+                nautobot_device_id=wlc_nautobot_id,
+                status="synced",
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to sync WLC device {ip_address}: {e}")
+            return SyncResult(
+                success=False,
+                device_id=device_id,
+                status="failed",
+                error=str(e),
+            )
 
     def sync_devices(
         self,
