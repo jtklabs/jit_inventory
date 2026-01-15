@@ -247,6 +247,74 @@ class ArubaHandler(VendorHandler):
         "63": "9004-LTE-JP",
     }
 
+    # Known Aruba AP models from wlanAPModel OID
+    # Format: 1.3.6.1.4.1.14823.1.2.MODEL_ID
+    # wlanAPModel returns an OID like "1.3.6.1.4.1.14823.1.2.48" -> AP-515
+    AP_MODEL_OID_MAP = {
+        # AP-500 series (Wi-Fi 6)
+        "48": "AP-515",
+        "49": "AP-505",
+        "50": "AP-535",
+        "51": "AP-555",
+        "52": "AP-505H",
+        "53": "AP-514",
+        "54": "AP-534",
+        "55": "AP-574",
+        "56": "AP-575",
+        "57": "AP-577",
+        # AP-600 series (Wi-Fi 6E)
+        "58": "AP-615",
+        "59": "AP-635",
+        "60": "AP-655",
+        # AP-300 series
+        "18": "AP-303",
+        "19": "AP-303H",
+        "20": "AP-305",
+        "21": "AP-315",
+        "22": "AP-325",
+        "23": "AP-335",
+        "24": "AP-345",
+        "25": "AP-365",
+        "26": "AP-367",
+        "27": "AP-387",
+        # AP-200 series
+        "10": "AP-205",
+        "11": "AP-205H",
+        "12": "AP-207",
+        "13": "AP-215",
+        "14": "AP-225",
+        "15": "AP-228",
+        "16": "AP-275",
+        "17": "AP-277",
+        # AP-100 series
+        "1": "AP-105",
+        "2": "AP-115",
+        "3": "AP-125",
+        "4": "AP-135",
+        "5": "AP-175",
+        # RAP (Remote AP)
+        "30": "RAP-108",
+        "31": "RAP-109",
+        "32": "RAP-155",
+        # IAP (Instant AP) - same hardware, different mode
+        "33": "IAP-105",
+        "34": "IAP-115",
+        "35": "IAP-205",
+        "36": "IAP-215",
+        "37": "IAP-225",
+        "38": "IAP-275",
+        "39": "IAP-305",
+        "40": "IAP-315",
+        "41": "IAP-325",
+        "42": "IAP-335",
+        # Outdoor APs
+        "43": "AP-375",
+        "44": "AP-377",
+        "45": "AP-387",
+        "46": "AP-567",
+        "47": "AP-577",
+    }
+
     @property
     def vendor_name(self) -> str:
         return "aruba"
@@ -359,12 +427,42 @@ class ArubaHandler(VendorHandler):
             model_id = match.group(1)
             return self.MODEL_OID_MAP.get(model_id)
 
-        # Try AP products (1.2.X) - return generic "AP" with model ID
+        # Try AP products (1.2.X) - use AP model map
         match = re.search(r"14823\.1\.2\.(\d+)", sys_object_id)
+        if match:
+            model_id = match.group(1)
+            return self.AP_MODEL_OID_MAP.get(model_id, f"AP-{model_id}")
+
+        return None
+
+    def _parse_ap_model_oid(self, model_oid: str | None) -> str | None:
+        """
+        Convert AP model OID to human-readable model name.
+
+        wlanAPModel returns an OID like "1.3.6.1.4.1.14823.1.2.48"
+        which maps to AP-515. If not in our map, extract the last
+        number and return as "AP-{id}".
+        """
+        if not model_oid:
+            return None
+
+        # Extract model ID from OID (last number after 14823.1.2.)
+        match = re.search(r"14823\.1\.2\.(\d+)", model_oid)
+        if match:
+            model_id = match.group(1)
+            return self.AP_MODEL_OID_MAP.get(model_id, f"AP-{model_id}")
+
+        # If it doesn't match OID pattern, it might already be a model name
+        # or some other format - return as-is if it looks like a model
+        if model_oid and not model_oid.startswith("1.3.6.1"):
+            return model_oid
+
+        # Last resort: extract any trailing number
+        match = re.search(r"\.(\d+)$", model_oid)
         if match:
             return f"AP-{match.group(1)}"
 
-        return None
+        return model_oid
 
     def get_collection_oids(self) -> dict[str, str]:
         """Return OIDs to collect for Aruba controllers."""
@@ -616,7 +714,7 @@ class ArubaHandler(VendorHandler):
                 elif oid_name == "wlanAPGroupName":
                     ap.group_name = value_str
                 elif oid_name == "wlanAPModel":
-                    ap.model = value_str
+                    ap.model = self._parse_ap_model_oid(value_str)
                 elif oid_name == "wlanAPSerialNumber":
                     ap.serial_number = value_str
                 elif oid_name == "wlanAPLocation":
