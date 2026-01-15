@@ -681,12 +681,22 @@ class NautobotSyncService:
                 # Determine AP status for Nautobot
                 nautobot_status = "Active" if ap_status == "up" else "Offline"
 
+                # Get or create AP IP if it has one
+                ap_ip_id = None
+                if ap_ip:
+                    try:
+                        ap_ip_result = self.client.get_or_create_ip_address(ap_ip)
+                        ap_ip_id = ap_ip_result["id"]
+                    except Exception as e:
+                        logger.warning(f"Failed to create IP for AP {ap_name}: {e}")
+
                 if existing_ap:
                     # Update existing AP
                     self.client.update_device(
                         nautobot_id=existing_ap["id"],
                         name=ap_name,
                         status=nautobot_status,
+                        primary_ip_id=ap_ip_id,
                     )
                 else:
                     # Check if device exists by name (serial may have changed = hardware replacement)
@@ -701,15 +711,6 @@ class NautobotSyncService:
                             status="Offline",
                         )
                         logger.info(f"Renamed old AP to {decom_name} (hardware replacement)")
-
-                    # Create AP IP if it has one
-                    ap_ip_id = None
-                    if ap_ip:
-                        try:
-                            ap_ip_result = self.client.get_or_create_ip_address(ap_ip)
-                            ap_ip_id = ap_ip_result["id"]
-                        except Exception as e:
-                            logger.warning(f"Failed to create IP for AP {ap_name}: {e}")
 
                     # Create the AP device
                     self.client.create_device(
