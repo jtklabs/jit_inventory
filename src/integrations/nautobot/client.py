@@ -106,11 +106,13 @@ class NautobotClient:
         cf_key = "software_version"
 
         try:
-            # Check if custom field already exists
-            cf = self.api.extras.custom_fields.get(key=cf_key)
-            if cf:
-                self._software_version_cf_key = cf_key
-                return self._software_version_cf_key
+            # Check if custom field already exists by searching all custom fields
+            # (Nautobot API doesn't support filtering by key directly)
+            all_cfs = list(self.api.extras.custom_fields.all())
+            for cf in all_cfs:
+                if hasattr(cf, 'key') and cf.key == cf_key:
+                    self._software_version_cf_key = cf_key
+                    return self._software_version_cf_key
 
             # Create the custom field
             cf = self.api.extras.custom_fields.create(
