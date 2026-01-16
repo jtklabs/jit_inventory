@@ -54,6 +54,7 @@ class NautobotClient:
             self.api.http_session.verify = False
 
         self._tag_id: str | None = None
+        self._software_version_cf_key: str | None = None
 
     def test_connection(self) -> bool:
         """Test connection to Nautobot API."""
@@ -95,6 +96,35 @@ class NautobotClient:
             return self._tag_id
         except Exception as e:
             logger.error(f"Failed to get/create tag: {e}")
+            raise
+
+    def get_or_create_software_version_cf(self) -> str:
+        """Get or create the software_version custom field. Returns the CF key."""
+        if self._software_version_cf_key:
+            return self._software_version_cf_key
+
+        cf_key = "software_version"
+
+        try:
+            # Check if custom field already exists
+            cf = self.api.extras.custom_fields.get(key=cf_key)
+            if cf:
+                self._software_version_cf_key = cf_key
+                return self._software_version_cf_key
+
+            # Create the custom field
+            cf = self.api.extras.custom_fields.create(
+                key=cf_key,
+                label="Software Version",
+                type="text",
+                content_types=["dcim.device"],
+                description="Device software/firmware version",
+            )
+            self._software_version_cf_key = cf_key
+            logger.info(f"Created Nautobot custom field: {cf_key}")
+            return self._software_version_cf_key
+        except Exception as e:
+            logger.error(f"Failed to get/create custom field: {e}")
             raise
 
     # -------------------------------------------------------------------------
@@ -409,6 +439,7 @@ class NautobotClient:
         location_id: str,
         serial: str | None = None,
         primary_ip_id: str | None = None,
+        software_version: str | None = None,
     ) -> str:
         """Create a device in Nautobot. Returns device ID."""
         try:
@@ -431,6 +462,11 @@ class NautobotClient:
 
             if serial:
                 device_data["serial"] = serial
+
+            # Add software version as custom field
+            if software_version:
+                cf_key = self.get_or_create_software_version_cf()
+                device_data["custom_fields"] = {cf_key: software_version}
 
             device = self.api.dcim.devices.create(**device_data)
             logger.info(f"Created Nautobot device: {name}")
@@ -490,6 +526,7 @@ class NautobotClient:
         serial: str | None = None,
         primary_ip_id: str | None = None,
         status: str | None = None,
+        software_version: str | None = None,
     ) -> bool:
         """Update an existing device in Nautobot."""
         try:
@@ -505,6 +542,15 @@ class NautobotClient:
             if serial and device.serial != serial:
                 device.serial = serial
                 device.save()
+
+            if software_version:
+                cf_key = self.get_or_create_software_version_cf()
+                # Update custom field value
+                current_cf = device.custom_fields or {}
+                if current_cf.get(cf_key) != software_version:
+                    device.custom_fields = {**current_cf, cf_key: software_version}
+                    device.save()
+                    logger.info(f"Updated software version for device {nautobot_id}")
 
             if status:
                 # Get status by name
@@ -680,6 +726,7 @@ class NautobotClient:
         location_id: str,
         serial: str | None = None,
         vc_position: int | None = None,
+        software_version: str | None = None,
     ) -> str:
         """
         Create a device that will be part of a stack (no primary IP).
@@ -705,6 +752,11 @@ class NautobotClient:
 
             if serial:
                 device_data["serial"] = serial
+
+            # Add software version as custom field
+            if software_version:
+                cf_key = self.get_or_create_software_version_cf()
+                device_data["custom_fields"] = {cf_key: software_version}
 
             device = self.api.dcim.devices.create(**device_data)
             logger.info(f"Created Nautobot stack device: {name}")

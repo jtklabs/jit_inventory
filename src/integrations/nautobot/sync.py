@@ -239,6 +239,7 @@ class NautobotSyncService:
                     nautobot_id=existing_device["id"],
                     name=device_data["name"],
                     status="Active" if device.is_active else "Offline",
+                    software_version=device_data.get("software_version"),
                 )
 
                 # Sync inventory items (components) if available
@@ -291,6 +292,7 @@ class NautobotSyncService:
                 location_id=location_status.location_id,
                 serial=device_data["serial"],
                 primary_ip_id=ip_result["id"],
+                software_version=device_data.get("software_version"),
             )
 
             # Sync inventory items (components) if available
@@ -353,6 +355,8 @@ class NautobotSyncService:
                 member_model = member.get("model") or device.model
                 member_serial = member.get("serial")
                 member_name = f"{base_name}-{switch_num}"
+                # Get software version from stack member data or fall back to device software version
+                member_sw_version = member.get("software_version") or device.software_version
 
                 # Get or create device type for this member's model
                 device_type_id = self.client.get_or_create_device_type(
@@ -364,11 +368,12 @@ class NautobotSyncService:
 
                 if existing_member:
                     member_device_id = existing_member["id"]
-                    # Update name and status
+                    # Update name, status, and software version
                     self.client.update_device(
                         nautobot_id=member_device_id,
                         name=member_name,
                         status="Active" if device.is_active else "Offline",
+                        software_version=member_sw_version,
                     )
                 else:
                     # Serial not found - check if device exists by name (serial may have changed = hardware replacement)
@@ -395,6 +400,7 @@ class NautobotSyncService:
                         role_id=role_id,
                         location_id=location_status.location_id,
                         serial=member_serial,
+                        software_version=member_sw_version,
                     )
 
                 member_devices[member_index] = member_device_id

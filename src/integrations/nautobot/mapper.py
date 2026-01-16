@@ -87,4 +87,5 @@ def map_device_to_nautobot(device: Device, location_id: str) -> dict:
         "location_id": location_id,
         "serial": device.serial_number,
         "ip_address": str(device.ip_address),
+        "software_version": device.software_version,
     }
