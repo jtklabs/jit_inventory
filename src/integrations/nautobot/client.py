@@ -54,7 +54,6 @@ class NautobotClient:
             self.api.http_session.verify = False
 
         self._tag_id: str | None = None
-        self._software_version_cf_key: str | None = None
 
     def test_connection(self) -> bool:
         """Test connection to Nautobot API."""
@@ -98,35 +97,55 @@ class NautobotClient:
             logger.error(f"Failed to get/create tag: {e}")
             raise
 
-    def get_or_create_software_version_cf(self) -> str:
-        """Get or create the software_version custom field. Returns the CF key."""
-        if self._software_version_cf_key:
-            return self._software_version_cf_key
+    def get_or_create_software_version(
+        self,
+        version: str,
+        platform_name: str,
+    ) -> str:
+        """
+        Get or create a Software Version in Nautobot.
 
-        cf_key = "software_version"
+        Args:
+            version: The version string (e.g., "17.3.5")
+            platform_name: The platform name (e.g., "Cisco IOS", "Arista EOS")
 
+        Returns:
+            The Software Version UUID
+        """
         try:
-            # Check if custom field already exists by searching all custom fields
-            # (Nautobot API doesn't support filtering by key directly)
-            all_cfs = list(self.api.extras.custom_fields.all())
-            for cf in all_cfs:
-                if hasattr(cf, 'key') and cf.key == cf_key:
-                    self._software_version_cf_key = cf_key
-                    return self._software_version_cf_key
+            # Get or create the platform first
+            platform = self.api.dcim.platforms.get(name=platform_name)
+            if not platform:
+                # Create the platform
+                platform = self.api.dcim.platforms.create(name=platform_name)
+                logger.info(f"Created Nautobot platform: {platform_name}")
 
-            # Create the custom field
-            cf = self.api.extras.custom_fields.create(
-                key=cf_key,
-                label="Software Version",
-                type="text",
-                content_types=["dcim.device"],
-                description="Device software/firmware version",
+            # Check if this software version already exists
+            existing = self.api.dcim.software_versions.get(
+                platform=platform.id,
+                version=version,
             )
-            self._software_version_cf_key = cf_key
-            logger.info(f"Created Nautobot custom field: {cf_key}")
-            return self._software_version_cf_key
+            if existing:
+                return str(existing.id)
+
+            # Get Active status for software versions
+            status = self.api.extras.statuses.get(name="Active")
+            if not status:
+                statuses = list(self.api.extras.statuses.filter(
+                    content_types="dcim.softwareversion"
+                ))
+                status = statuses[0] if statuses else None
+
+            # Create the software version
+            sw_version = self.api.dcim.software_versions.create(
+                platform=platform.id,
+                version=version,
+                status=status.id if status else None,
+            )
+            logger.info(f"Created Nautobot software version: {platform_name} {version}")
+            return str(sw_version.id)
         except Exception as e:
-            logger.error(f"Failed to get/create custom field: {e}")
+            logger.error(f"Failed to get/create software version: {e}")
             raise
 
     # -------------------------------------------------------------------------
@@ -442,6 +461,7 @@ class NautobotClient:
         serial: str | None = None,
         primary_ip_id: str | None = None,
         software_version: str | None = None,
+        platform_name: str | None = None,
     ) -> str:
         """Create a device in Nautobot. Returns device ID."""
         try:
@@ -465,10 +485,13 @@ class NautobotClient:
             if serial:
                 device_data["serial"] = serial
 
-            # Add software version as custom field
-            if software_version:
-                cf_key = self.get_or_create_software_version_cf()
-                device_data["custom_fields"] = {cf_key: software_version}
+            # Add software version using native Software Versions endpoint
+            if software_version and platform_name:
+                try:
+                    sw_version_id = self.get_or_create_software_version(software_version, platform_name)
+                    device_data["software_version"] = sw_version_id
+                except Exception as e:
+                    logger.warning(f"Failed to set software version for device {name}: {e}")
 
             device = self.api.dcim.devices.create(**device_data)
             logger.info(f"Created Nautobot device: {name}")
@@ -529,6 +552,7 @@ class NautobotClient:
         primary_ip_id: str | None = None,
         status: str | None = None,
         software_version: str | None = None,
+        platform_name: str | None = None,
     ) -> bool:
         """Update an existing device in Nautobot."""
         try:
@@ -545,14 +569,18 @@ class NautobotClient:
                 device.serial = serial
                 device.save()
 
-            if software_version:
-                cf_key = self.get_or_create_software_version_cf()
-                # Update custom field value
-                current_cf = device.custom_fields or {}
-                if current_cf.get(cf_key) != software_version:
-                    device.custom_fields = {**current_cf, cf_key: software_version}
-                    device.save()
-                    logger.info(f"Updated software version for device {nautobot_id}")
+            # Update software version using native Software Versions endpoint
+            if software_version and platform_name:
+                try:
+                    sw_version_id = self.get_or_create_software_version(software_version, platform_name)
+                    # Check if software version changed
+                    current_sw_id = str(device.software_version.id) if device.software_version else None
+                    if current_sw_id != sw_version_id:
+                        device.software_version = sw_version_id
+                        device.save()
+                        logger.info(f"Updated software version for device {nautobot_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to update software version for device {nautobot_id}: {e}")
 
             if status:
                 # Get status by name
@@ -729,6 +757,7 @@ class NautobotClient:
         serial: str | None = None,
         vc_position: int | None = None,
         software_version: str | None = None,
+        platform_name: str | None = None,
     ) -> str:
         """
         Create a device that will be part of a stack (no primary IP).
@@ -755,10 +784,13 @@ class NautobotClient:
             if serial:
                 device_data["serial"] = serial
 
-            # Add software version as custom field
-            if software_version:
-                cf_key = self.get_or_create_software_version_cf()
-                device_data["custom_fields"] = {cf_key: software_version}
+            # Add software version using native Software Versions endpoint
+            if software_version and platform_name:
+                try:
+                    sw_version_id = self.get_or_create_software_version(software_version, platform_name)
+                    device_data["software_version"] = sw_version_id
+                except Exception as e:
+                    logger.warning(f"Failed to set software version for device {name}: {e}")
 
             device = self.api.dcim.devices.create(**device_data)
             logger.info(f"Created Nautobot stack device: {name}")

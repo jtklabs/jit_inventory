@@ -240,6 +240,7 @@ class NautobotSyncService:
                     name=device_data["name"],
                     status="Active" if device.is_active else "Offline",
                     software_version=device_data.get("software_version"),
+                    platform_name=device_data.get("platform"),
                 )
 
                 # Sync inventory items (components) if available
@@ -293,6 +294,7 @@ class NautobotSyncService:
                 serial=device_data["serial"],
                 primary_ip_id=ip_result["id"],
                 software_version=device_data.get("software_version"),
+                platform_name=device_data.get("platform"),
             )
 
             # Sync inventory items (components) if available
@@ -374,6 +376,7 @@ class NautobotSyncService:
                         name=member_name,
                         status="Active" if device.is_active else "Offline",
                         software_version=member_sw_version,
+                        platform_name=device.platform,
                     )
                 else:
                     # Serial not found - check if device exists by name (serial may have changed = hardware replacement)
@@ -401,6 +404,7 @@ class NautobotSyncService:
                         location_id=location_status.location_id,
                         serial=member_serial,
                         software_version=member_sw_version,
+                        platform_name=device.platform,
                     )
 
                 member_devices[member_index] = member_device_id
@@ -641,6 +645,7 @@ class NautobotSyncService:
                     name=device_data["name"],
                     status="Active" if device.is_active else "Offline",
                     software_version=device_data.get("software_version"),
+                    platform_name=device_data.get("platform"),
                 )
             else:
                 wlc_nautobot_id = self.client.create_device(
@@ -651,6 +656,7 @@ class NautobotSyncService:
                     serial=device_data["serial"],
                     primary_ip_id=ip_result["id"],
                     software_version=device_data.get("software_version"),
+                    platform_name=device_data.get("platform"),
                 )
 
             # Get or create AP role
@@ -665,6 +671,8 @@ class NautobotSyncService:
                 ap_ip = ap.get("ip_address")
                 ap_status = ap.get("status", "").lower()
                 ap_software_version = ap.get("software_version")
+                # Use AP platform if available, or derive from WLC vendor
+                ap_platform = ap.get("platform") or f"{device.vendor} AP" if device.vendor else None
 
                 # Skip APs without serial numbers (can't uniquely identify them)
                 if not ap_serial:
@@ -707,6 +715,7 @@ class NautobotSyncService:
                         status=nautobot_status,
                         primary_ip_id=ap_ip_id,
                         software_version=ap_software_version,
+                        platform_name=ap_platform,
                     )
                 else:
                     # Check if device exists by name (serial may have changed = hardware replacement)
@@ -731,6 +740,7 @@ class NautobotSyncService:
                         serial=ap_serial,
                         primary_ip_id=ap_ip_id,
                         software_version=ap_software_version,
+                        platform_name=ap_platform,
                     )
 
                 ap_count += 1
