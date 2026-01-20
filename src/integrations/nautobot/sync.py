@@ -72,15 +72,53 @@ class NautobotSyncService:
         self.client = client
 
     def _is_stack_device(self, device: Device) -> bool:
-        """Check if device is a stack with multiple members."""
+        """
+        Check if device is a stack with multiple members.
+
+        Returns False for Nexus with FEX modules - those are line cards,
+        not stackable switches, and should not create a virtual chassis.
+        """
         if not device.metadata_:
             return False
         inventory = device.metadata_.get("inventory", {})
-        # It's a stack if is_stack flag is set or there are multiple stack members
+
+        # Explicit is_stack flag takes precedence
         if inventory.get("is_stack"):
+            # But check for FEX - if it's explicitly marked as stack but has FEX, it's not a real stack
+            if self._has_fex_modules(inventory):
+                return False
             return True
+
         stack_members = inventory.get("stack_members", [])
-        return len(stack_members) > 1
+        if len(stack_members) <= 1:
+            return False
+
+        # Check if these are FEX modules (Cisco Fabric Extenders)
+        # FEX modules should not be treated as stack members for virtual chassis
+        if self._has_fex_modules(inventory):
+            return False
+
+        return True
+
+    def _has_fex_modules(self, inventory: dict) -> bool:
+        """
+        Check if inventory contains FEX (Fabric Extender) modules.
+
+        FEX modules are remote line cards for Nexus switches (N2K-* models).
+        They should not be treated as stack members because they're not
+        independent switches - they're extensions of the parent Nexus.
+        """
+        stack_members = inventory.get("stack_members", [])
+        for member in stack_members:
+            model = (member.get("model") or "").upper()
+            # FEX models start with N2K (e.g., N2K-C2248TP-E, N2K-C2232PP)
+            if model.startswith("N2K"):
+                return True
+            # Also check description for FEX indicators
+            desc = (member.get("description") or "").upper()
+            if "FABRIC EXTENDER" in desc or "FEX" in desc:
+                return True
+        return False
 
     def _get_stack_members(self, device: Device) -> list[dict]:
         """Get stack members from device inventory."""
