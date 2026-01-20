@@ -89,34 +89,33 @@
                             {% endif %}
                         </td>
                     </tr>
-                </table>
-
-                <!-- Nautobot Sync Status -->
-                <tr>
-                    <th>Nautobot Status</th>
-                    <td>
-                        {% if device.nautobot_sync %}
-                            {% if device.nautobot_sync.sync_status == 'synced' %}
-                                <span class="badge bg-success"><i class="bi bi-check-circle"></i> Synced</span>
-                            {% elif device.nautobot_sync.sync_status == 'ready' %}
-                                <span class="badge bg-primary"><i class="bi bi-arrow-up-circle"></i> Ready to Sync</span>
-                            {% elif device.nautobot_sync.sync_status == 'no_location' %}
-                                <span class="badge bg-warning text-dark"><i class="bi bi-geo-alt"></i> No Location</span>
-                            {% elif device.nautobot_sync.sync_status == 'no_prefix' %}
-                                <span class="badge bg-danger"><i class="bi bi-x-circle"></i> No Prefix</span>
-                            {% elif device.nautobot_sync.sync_status == 'failed' %}
-                                <span class="badge bg-danger"><i class="bi bi-exclamation-triangle"></i> Failed</span>
-                                {% if device.nautobot_sync.error_message %}
-                                    <small class="text-danger d-block">{{ device.nautobot_sync.error_message[:100] }}</small>
+                    <!-- Nautobot Sync Status -->
+                    <tr>
+                        <th>Nautobot Status</th>
+                        <td>
+                            {% if device.nautobot_sync %}
+                                {% if device.nautobot_sync.sync_status == 'synced' %}
+                                    <span class="badge bg-success"><i class="bi bi-check-circle"></i> Synced</span>
+                                {% elif device.nautobot_sync.sync_status == 'ready' %}
+                                    <span class="badge bg-primary"><i class="bi bi-arrow-up-circle"></i> Ready to Sync</span>
+                                {% elif device.nautobot_sync.sync_status == 'no_location' %}
+                                    <span class="badge bg-warning text-dark"><i class="bi bi-geo-alt"></i> No Location</span>
+                                {% elif device.nautobot_sync.sync_status == 'no_prefix' %}
+                                    <span class="badge bg-danger"><i class="bi bi-x-circle"></i> No Prefix</span>
+                                {% elif device.nautobot_sync.sync_status == 'failed' %}
+                                    <span class="badge bg-danger"><i class="bi bi-exclamation-triangle"></i> Failed</span>
+                                    {% if device.nautobot_sync.error_message %}
+                                        <small class="text-danger d-block">{{ device.nautobot_sync.error_message[:100] }}</small>
+                                    {% endif %}
+                                {% else %}
+                                    <span class="badge bg-secondary"><i class="bi bi-clock"></i> Pending</span>
                                 {% endif %}
                             {% else %}
-                                <span class="badge bg-secondary"><i class="bi bi-clock"></i> Pending</span>
+                                <span class="badge bg-secondary"><i class="bi bi-question-circle"></i> Not Checked</span>
                             {% endif %}
-                        {% else %}
-                            <span class="badge bg-secondary"><i class="bi bi-question-circle"></i> Not Checked</span>
-                        {% endif %}
-                    </td>
-                </tr>
+                        </td>
+                    </tr>
+                </table>
 
                 <!-- Action buttons -->
                 <div class="mt-3 pt-3 border-top">
