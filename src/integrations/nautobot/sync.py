@@ -657,10 +657,22 @@ class NautobotSyncService:
             if contained_in in member_devices:
                 return member_devices[contained_in]
 
-            # Find the nearest stack member (floor division to get stack index)
+            # For high indices (1000+), find the nearest stack member
             # E.g., contained_in=1500 should map to index 1000
-            stack_index = (contained_in // 1000) * 1000
-            return member_devices.get(stack_index)
+            if contained_in >= 1000:
+                stack_index = (contained_in // 1000) * 1000
+                return member_devices.get(stack_index)
+
+            # For low indices (< 1000), map to the parent chassis
+            # Parent chassis typically has index 1, but components may have
+            # contained_in values like 1, 2, 3, etc. - all belong to parent
+            # Find the lowest index in member_devices (that's the parent)
+            low_indices = [idx for idx in member_devices.keys() if idx < 1000]
+            if low_indices:
+                parent_index = min(low_indices)
+                return member_devices.get(parent_index)
+
+            return None
 
         # Group components by their target device
         components_by_device: dict[str, list[dict]] = {}
