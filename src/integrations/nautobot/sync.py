@@ -94,11 +94,50 @@ class NautobotSyncService:
         return True
 
     def _get_stack_members(self, device: Device) -> list[dict]:
-        """Get stack members from device inventory."""
+        """
+        Get stack members from device inventory.
+
+        For Nexus with FEX, this also includes the parent chassis as the first
+        member since the collector only puts FEX modules in stack_members.
+        """
         if not device.metadata_:
             return []
         inventory = device.metadata_.get("inventory", {})
-        return inventory.get("stack_members", [])
+        stack_members = inventory.get("stack_members", [])
+
+        # Check if we have FEX modules without a parent chassis in the list
+        # FEX modules are N2K-* models or have "FEX" in description
+        has_fex = any(
+            (member.get("model") or "").upper().startswith("N2K") or
+            "FEX" in (member.get("description") or "").upper()
+            for member in stack_members
+        )
+
+        if has_fex:
+            # Check if the parent chassis is already in stack_members
+            # Parent chassis would have a low index (< 1000)
+            has_parent = any(
+                member.get("index", 0) < 1000
+                for member in stack_members
+            )
+
+            if not has_parent:
+                # Get chassis info from inventory and add it as the first member
+                chassis = inventory.get("chassis")
+                if chassis and isinstance(chassis, dict):
+                    # Create a member entry from chassis data
+                    parent_member = {
+                        "index": chassis.get("index", 1),
+                        "model": chassis.get("model") or device.model,
+                        "serial": chassis.get("serial") or device.serial_number,
+                        "description": chassis.get("description") or device.hostname or "Parent Chassis",
+                        "software_version": device.software_version,
+                        "role": "master",  # Parent chassis is the master
+                    }
+                    # Insert parent at the beginning
+                    stack_members = [parent_member] + list(stack_members)
+
+        return stack_members
 
     def _is_wlc_device(self, device: Device) -> bool:
         """Check if device is a wireless controller with access points."""
@@ -430,8 +469,8 @@ class NautobotSyncService:
                     # Traditional stack: index 1000 -> switch 1, 2000 -> switch 2
                     switch_num = member_index // 1000
                 else:
-                    # Parent chassis or other: use 0 for master
-                    switch_num = member_index
+                    # Parent chassis (index < 1000): use 0 for master position
+                    switch_num = 0
 
                 candidate_name = f"{base_name}-{switch_num}"
                 candidate_position = switch_num if switch_num <= 255 else i
