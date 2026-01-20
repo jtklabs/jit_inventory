@@ -27,6 +27,9 @@ class LocationStatus:
     prefix_cidr: str | None = None
     location_id: str | None = None
     location_name: str | None = None
+    # New: track if device already exists in Nautobot
+    device_exists: bool = False
+    nautobot_device_id: str | None = None
 
 
 @dataclass
@@ -106,17 +109,41 @@ class NautobotSyncService:
         Check if a device can be synced to Nautobot.
 
         Queries Nautobot to find if the device's IP is in a prefix
-        that has a location assigned.
+        that has a location assigned. Also checks if the device already
+        exists in Nautobot (by serial number or name).
         """
         ip_address = str(device.ip_address)
 
         try:
+            # First, check if device already exists in Nautobot
+            device_exists = False
+            nautobot_device_id = None
+
+            # Check by serial number first (most reliable identifier)
+            if device.serial_number:
+                existing = self.client.get_device_by_serial(device.serial_number)
+                if existing:
+                    device_exists = True
+                    nautobot_device_id = existing["id"]
+
+            # If not found by serial, check by hostname
+            if not device_exists and device.hostname:
+                existing = self.client.get_device_by_name(
+                    sanitize_nautobot_name(device.hostname)
+                )
+                if existing:
+                    device_exists = True
+                    nautobot_device_id = existing["id"]
+
+            # Now check prefix/location status
             prefix_info = self.client.get_prefix_for_ip(ip_address)
 
             if not prefix_info:
                 return LocationStatus(
                     has_prefix=False,
                     has_location=False,
+                    device_exists=device_exists,
+                    nautobot_device_id=nautobot_device_id,
                 )
 
             return LocationStatus(
@@ -126,6 +153,8 @@ class NautobotSyncService:
                 prefix_cidr=prefix_info.prefix,
                 location_id=prefix_info.location_id,
                 location_name=prefix_info.location_name,
+                device_exists=device_exists,
+                nautobot_device_id=nautobot_device_id,
             )
         except Exception as e:
             logger.error(f"Failed to check location status for {ip_address}: {e}")

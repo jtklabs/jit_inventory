@@ -384,10 +384,12 @@ def inventory():
     vendor_filter = request.args.get("vendor")
     type_filter = request.args.get("type")
     status_filter = request.args.get("status")
+    nautobot_status_filter = request.args.get("nautobot_status")
 
     try:
         with get_db_session() as session:
             device_repo = DeviceRepository(session)
+            sync_repo = NautobotSyncRepository(session)
             vendors = device_repo.get_vendors()
             device_types = device_repo.get_device_types()
 
@@ -404,6 +406,18 @@ def inventory():
                 is_active=is_active,
                 limit=10000,  # Increased from 500 to support larger inventories
             )
+
+            # Filter by Nautobot sync status if specified
+            if nautobot_status_filter:
+                if nautobot_status_filter == "pending":
+                    # Devices without any sync status record
+                    devices = [d for d in devices if not d.nautobot_sync]
+                else:
+                    # Filter by specific status
+                    devices = [
+                        d for d in devices
+                        if d.nautobot_sync and d.nautobot_sync.sync_status == nautobot_status_filter
+                    ]
     except Exception as e:
         error = str(e)
 
@@ -417,6 +431,7 @@ def inventory():
             "vendor": vendor_filter,
             "type": type_filter,
             "status": status_filter,
+            "nautobot_status": nautobot_status_filter,
         },
     )
 
@@ -1212,7 +1227,10 @@ def nautobot_check_location_status():
                         status = sync_service.check_device_location_status(device)
 
                         # Update sync status in DB
-                        if not status.has_prefix:
+                        # If device already exists in Nautobot, mark as synced
+                        if status.device_exists:
+                            sync_repo.mark_synced(device_id, status.nautobot_device_id)
+                        elif not status.has_prefix:
                             sync_repo.mark_no_prefix(device_id)
                         elif not status.has_location:
                             sync_repo.mark_no_location(device_id, status.prefix_id)
@@ -1537,7 +1555,13 @@ def nautobot_refresh_status():
 
                         status = sync_service.check_device_location_status(device)
 
-                        if not status.has_prefix:
+                        # If device already exists in Nautobot, mark as synced
+                        if status.device_exists:
+                            sync_repo.mark_synced(
+                                str(device.id),
+                                status.nautobot_device_id,
+                            )
+                        elif not status.has_prefix:
                             sync_repo.mark_no_prefix(str(device.id))
                         elif not status.has_location:
                             sync_repo.mark_no_location(str(device.id), status.prefix_id)

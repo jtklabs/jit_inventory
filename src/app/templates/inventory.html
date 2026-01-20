@@ -39,7 +39,7 @@
 <div class="card mb-4">
     <div class="card-body">
         <form method="GET" class="row g-3 align-items-end">
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label for="vendor" class="form-label">Vendor</label>
                 <select class="form-select" id="vendor" name="vendor">
                     <option value="">All Vendors</option>
@@ -50,7 +50,7 @@
                     {% endfor %}
                 </select>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label for="type" class="form-label">Device Type</label>
                 <select class="form-select" id="type" name="type">
                     <option value="">All Types</option>
@@ -67,6 +67,18 @@
                     <option value="">All</option>
                     <option value="active" {% if filters.status == 'active' %}selected{% endif %}>Active</option>
                     <option value="inactive" {% if filters.status == 'inactive' %}selected{% endif %}>Inactive</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label for="nautobot_status" class="form-label">Nautobot Status</label>
+                <select class="form-select" id="nautobot_status" name="nautobot_status">
+                    <option value="">All</option>
+                    <option value="pending" {% if filters.nautobot_status == 'pending' %}selected{% endif %}>Pending Check</option>
+                    <option value="no_prefix" {% if filters.nautobot_status == 'no_prefix' %}selected{% endif %}>No Prefix</option>
+                    <option value="no_location" {% if filters.nautobot_status == 'no_location' %}selected{% endif %}>No Location</option>
+                    <option value="ready" {% if filters.nautobot_status == 'ready' %}selected{% endif %}>Ready to Sync</option>
+                    <option value="synced" {% if filters.nautobot_status == 'synced' %}selected{% endif %}>Synced</option>
+                    <option value="failed" {% if filters.nautobot_status == 'failed' %}selected{% endif %}>Failed</option>
                 </select>
             </div>
             <div class="col-md-2">
@@ -116,7 +128,7 @@
                     </thead>
                     <tbody id="devicesTableBody">
                         {% for device in devices %}
-                            <tr class="device-row" data-device-id="{{ device.id }}" data-searchable="{{ device.ip_address }} {{ device.hostname or '' }} {{ device.vendor or '' }} {{ device.device_type or '' }} {{ device.platform or '' }} {{ device.model or '' }} {{ device.serial_number or '' }} {{ device.software_version or '' }}">
+                            <tr class="device-row" data-device-id="{{ device.id }}" data-nautobot-status="{{ device.nautobot_sync.sync_status if device.nautobot_sync else 'pending' }}" data-searchable="{{ device.ip_address }} {{ device.hostname or '' }} {{ device.vendor or '' }} {{ device.device_type or '' }} {{ device.platform or '' }} {{ device.model or '' }} {{ device.serial_number or '' }} {{ device.software_version or '' }} {{ device.nautobot_sync.sync_status if device.nautobot_sync else 'pending' }}">
                                 <td onclick="event.stopPropagation();">
                                     <input type="checkbox" class="form-check-input device-checkbox" value="{{ device.id }}" onchange="updateSelectedCount()">
                                 </td>
@@ -311,6 +323,12 @@ function checkRunningJobs() {
                         jobLabel = 'Refresh Selected';
                     } else if (job.job_type === 'batch') {
                         jobLabel = 'Batch Scan';
+                    } else if (job.job_type === 'nautobot_check_status' || job.job_type === 'nautobot_status_check') {
+                        jobLabel = 'Nautobot Status Check';
+                    } else if (job.job_type === 'nautobot_ensure_prefixes') {
+                        jobLabel = 'Nautobot Create Prefixes';
+                    } else if (job.job_type === 'nautobot_sync') {
+                        jobLabel = 'Nautobot Sync';
                     }
                     html += `
                         <div class="alert alert-info mb-3">
@@ -413,17 +431,15 @@ function nautobotCheckStatus() {
     .then(data => {
         if (data.error) {
             alert('Error: ' + data.error);
+        } else if (data.job_id) {
+            // Background job started - uncheck boxes and start polling
+            document.querySelectorAll('.device-checkbox').forEach(cb => cb.checked = false);
+            document.getElementById('selectAllCheckbox').checked = false;
+            updateSelectedCount();
+            alert(`Status check started for ${data.device_count} devices. Check progress above.`);
+            checkRunningJobs();
         } else {
-            let summary = 'Status check complete:\n';
-            let counts = { no_prefix: 0, no_location: 0, ready: 0, error: 0 };
-            data.results.forEach(r => {
-                if (r.status in counts) counts[r.status]++;
-            });
-            summary += `- No Prefix: ${counts.no_prefix}\n`;
-            summary += `- No Location: ${counts.no_location}\n`;
-            summary += `- Ready: ${counts.ready}\n`;
-            if (counts.error > 0) summary += `- Errors: ${counts.error}\n`;
-            alert(summary);
+            alert('Status check started');
             location.reload();
         }
     })
@@ -450,17 +466,15 @@ function nautobotCreatePrefixes() {
     .then(data => {
         if (data.error) {
             alert('Error: ' + data.error);
+        } else if (data.job_id) {
+            // Background job started - uncheck boxes and start polling
+            document.querySelectorAll('.device-checkbox').forEach(cb => cb.checked = false);
+            document.getElementById('selectAllCheckbox').checked = false;
+            updateSelectedCount();
+            alert(`Prefix creation started for ${data.device_count} devices. Check progress above.`);
+            checkRunningJobs();
         } else {
-            let summary = 'Prefix creation complete:\n';
-            summary += `- Prefixes created: ${data.created_prefixes}\n`;
-            summary += `- IPs created: ${data.created_ips}\n`;
-            if (data.errors && data.errors.length > 0) {
-                summary += `- Errors: ${data.errors.length}\n`;
-                data.errors.slice(0, 3).forEach(e => {
-                    summary += `  - ${e.ip}: ${e.error}\n`;
-                });
-            }
-            alert(summary);
+            alert('Prefix creation started');
             location.reload();
         }
     })
@@ -487,17 +501,15 @@ function nautobotSyncDevices() {
     .then(data => {
         if (data.error) {
             alert('Error: ' + data.error);
+        } else if (data.job_id) {
+            // Background job started - uncheck boxes and start polling
+            document.querySelectorAll('.device-checkbox').forEach(cb => cb.checked = false);
+            document.getElementById('selectAllCheckbox').checked = false;
+            updateSelectedCount();
+            alert(`Sync started for ${data.device_count} devices. Check progress above.`);
+            checkRunningJobs();
         } else {
-            let summary = 'Sync complete:\n';
-            summary += `- Synced: ${data.synced}\n`;
-            summary += `- Skipped (no location): ${data.skipped}\n`;
-            summary += `- Failed: ${data.failed}\n`;
-            if (data.errors && data.errors.length > 0) {
-                data.errors.slice(0, 3).forEach(e => {
-                    summary += `  - ${e.ip}: ${e.error}\n`;
-                });
-            }
-            alert(summary);
+            alert('Sync started');
             location.reload();
         }
     })
