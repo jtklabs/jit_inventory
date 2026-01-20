@@ -91,6 +91,33 @@
                     </tr>
                 </table>
 
+                <!-- Nautobot Sync Status -->
+                <tr>
+                    <th>Nautobot Status</th>
+                    <td>
+                        {% if device.nautobot_sync %}
+                            {% if device.nautobot_sync.sync_status == 'synced' %}
+                                <span class="badge bg-success"><i class="bi bi-check-circle"></i> Synced</span>
+                            {% elif device.nautobot_sync.sync_status == 'ready' %}
+                                <span class="badge bg-primary"><i class="bi bi-arrow-up-circle"></i> Ready to Sync</span>
+                            {% elif device.nautobot_sync.sync_status == 'no_location' %}
+                                <span class="badge bg-warning text-dark"><i class="bi bi-geo-alt"></i> No Location</span>
+                            {% elif device.nautobot_sync.sync_status == 'no_prefix' %}
+                                <span class="badge bg-danger"><i class="bi bi-x-circle"></i> No Prefix</span>
+                            {% elif device.nautobot_sync.sync_status == 'failed' %}
+                                <span class="badge bg-danger"><i class="bi bi-exclamation-triangle"></i> Failed</span>
+                                {% if device.nautobot_sync.error_message %}
+                                    <small class="text-danger d-block">{{ device.nautobot_sync.error_message[:100] }}</small>
+                                {% endif %}
+                            {% else %}
+                                <span class="badge bg-secondary"><i class="bi bi-clock"></i> Pending</span>
+                            {% endif %}
+                        {% else %}
+                            <span class="badge bg-secondary"><i class="bi bi-question-circle"></i> Not Checked</span>
+                        {% endif %}
+                    </td>
+                </tr>
+
                 <!-- Action buttons -->
                 <div class="mt-3 pt-3 border-top">
                     <form method="POST" action="{{ url_for('rescan_device', device_id=device.id) }}" class="d-inline">
@@ -98,10 +125,23 @@
                             <i class="bi bi-arrow-clockwise"></i> Rescan Device
                         </button>
                     </form>
+                    <div class="btn-group ms-2">
+                        <button type="button" class="btn btn-outline-info btn-sm dropdown-toggle" data-bs-toggle="dropdown">
+                            <i class="bi bi-cloud-upload"></i> Nautobot
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#" onclick="nautobotCheckStatus(); return false;"><i class="bi bi-search"></i> Check Status</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="nautobotCreatePrefix(); return false;"><i class="bi bi-plus-circle"></i> Create Prefix</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="nautobotSyncDevice(); return false;"><i class="bi bi-cloud-upload"></i> Sync to Nautobot</a></li>
+                        </ul>
+                    </div>
                 </div>
                 <small class="text-muted d-block mt-1">
                     Rescan tries all credential profiles and collects full inventory
                 </small>
+
+<!-- Job Progress Indicator -->
+<div id="job-progress-container" class="mt-3"></div>
             </div>
         </div>
     </div>
@@ -579,4 +619,123 @@
 </div>
 {% endif %}
 
+<script>
+const deviceId = '{{ device.id }}';
+let jobCheckInterval = null;
+
+function nautobotCheckStatus() {
+    fetch('/nautobot/check-location-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_ids: [deviceId] })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            showJobMessage('danger', 'Error: ' + data.error);
+        } else if (data.job_id) {
+            pollJobStatus(data.job_id);
+        } else {
+            location.reload();
+        }
+    })
+    .catch(err => showJobMessage('danger', 'Error: ' + err));
+}
+
+function nautobotCreatePrefix() {
+    fetch('/nautobot/ensure-prefixes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_ids: [deviceId] })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            showJobMessage('danger', 'Error: ' + data.error);
+        } else if (data.job_id) {
+            pollJobStatus(data.job_id);
+        } else {
+            location.reload();
+        }
+    })
+    .catch(err => showJobMessage('danger', 'Error: ' + err));
+}
+
+function nautobotSyncDevice() {
+    fetch('/nautobot/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_ids: [deviceId] })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            showJobMessage('danger', 'Error: ' + data.error);
+        } else if (data.job_id) {
+            pollJobStatus(data.job_id);
+        } else {
+            location.reload();
+        }
+    })
+    .catch(err => showJobMessage('danger', 'Error: ' + err));
+}
+
+function showJobMessage(type, message) {
+    const container = document.getElementById('job-progress-container');
+    container.innerHTML = `<div class="alert alert-${type} py-2">${message}</div>`;
+}
+
+function pollJobStatus(jobId) {
+    const container = document.getElementById('job-progress-container');
+    container.innerHTML = `
+        <div class="alert alert-info py-2">
+            <span class="spinner-border spinner-border-sm me-2"></span>
+            Processing...
+        </div>
+    `;
+
+    const checkJob = () => {
+        fetch(`/api/jobs/${jobId}`)
+            .then(response => response.json())
+            .then(job => {
+                if (job.status === 'running') {
+                    // Still running, keep polling
+                    if (!jobCheckInterval) {
+                        jobCheckInterval = setInterval(checkJob, 1000);
+                    }
+                } else {
+                    // Job finished
+                    if (jobCheckInterval) {
+                        clearInterval(jobCheckInterval);
+                        jobCheckInterval = null;
+                    }
+                    if (job.status === 'completed') {
+                        const alertClass = job.fail_count > 0 ? 'warning' : 'success';
+                        container.innerHTML = `
+                            <div class="alert alert-${alertClass} py-2">
+                                <i class="bi bi-check-circle"></i> Completed. Refreshing...
+                            </div>
+                        `;
+                    } else {
+                        container.innerHTML = `
+                            <div class="alert alert-warning py-2">
+                                <i class="bi bi-x-circle"></i> ${job.status}
+                            </div>
+                        `;
+                    }
+                    setTimeout(() => location.reload(), 1000);
+                }
+            })
+            .catch(err => {
+                if (jobCheckInterval) {
+                    clearInterval(jobCheckInterval);
+                    jobCheckInterval = null;
+                }
+                showJobMessage('danger', 'Error checking job: ' + err);
+            });
+    };
+
+    checkJob();
+}
+</script>
 {% endblock %}
