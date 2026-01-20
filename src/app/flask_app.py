@@ -462,6 +462,15 @@ def device_detail(device_id):
             if device.metadata_ and "inventory" in device.metadata_:
                 inventory = device.metadata_["inventory"]
 
+            # Render template inside session context to allow lazy loading of nautobot_sync
+            return render_template(
+                "device_detail.html",
+                device=device,
+                inventory=inventory,
+                scan_history=scan_history,
+                error=error,
+            )
+
     except Exception as e:
         error = str(e)
 
