@@ -35,6 +35,12 @@ services:
       - NAUTOBOT_TOKEN=${NAUTOBOT_TOKEN}
       - NAUTOBOT_VERIFY_SSL=${NAUTOBOT_VERIFY_SSL:-true}
       - NAUTOBOT_TAG_NAME=${NAUTOBOT_TAG_NAME:-Nova Inventory}
+      # Authentication
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      - AUTH_USERNAME=${AUTH_USERNAME:-admin}
+      - AUTH_PASSWORD_HASH=${AUTH_PASSWORD_HASH:-admin}
+      - SECRET_KEY=${SECRET_KEY:-change-this-secret-key-in-production}
+      - SESSION_LIFETIME_HOURS=${SESSION_LIFETIME_HOURS:-24}
     volumes:
       - ./src:/app/src
       - ./data/credentials:/app/data/credentials

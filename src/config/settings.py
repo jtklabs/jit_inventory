@@ -46,6 +46,17 @@ class Settings(BaseSettings):
     nautobot_verify_ssl: bool = True
     nautobot_tag_name: str = "Nova Inventory"
 
+    # Authentication
+    auth_enabled: bool = True
+    auth_username: str = "admin"
+    # Password can be plaintext or a werkzeug hash (pbkdf2:sha256:...)
+    # Generate hash with:
+    #   python -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('your-password', method='pbkdf2:sha256'))"
+    # Note: In docker-compose .env files, escape $ as $$ (e.g., pbkdf2:sha256:...$$salt$$hash)
+    auth_password_hash: str = "admin"  # Default plaintext for dev, use hash in production
+    secret_key: str = "change-this-secret-key-in-production"
+    session_lifetime_hours: int = 24
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -55,6 +55,18 @@
                 <div class="text-center mb-4">
                     <h5 class="text-white"><i class="bi bi-hdd-network"></i> JIT Inventory</h5>
                 </div>
+                {% if auth_enabled and current_user %}
+                <div class="px-3 mb-3 pb-3 border-bottom border-secondary">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <small class="text-light">
+                            <i class="bi bi-person-circle"></i> {{ current_user }}
+                        </small>
+                        <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-light" title="Logout">
+                            <i class="bi bi-box-arrow-right"></i>
+                        </a>
+                    </div>
+                </div>
+                {% endif %}
                 <ul class="nav flex-column">
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">

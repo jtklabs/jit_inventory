@@ -4,9 +4,11 @@ Flask application for Network Device Inventory.
 import asyncio
 import logging
 import os
+from datetime import timedelta
 from functools import wraps
 
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session
+from werkzeug.security import check_password_hash
 
 # Configure logging
 log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
@@ -28,8 +30,11 @@ from src.db.repositories.nautobot_sync import NautobotSyncRepository
 from src.scheduler import get_scheduler
 from src.snmp.client import AuthProtocol, PrivProtocol
 
+# Initialize Flask app
+settings = get_settings()
 app = Flask(__name__)
-app.secret_key = "dev-secret-key-change-in-production"
+app.secret_key = settings.secret_key
+app.permanent_session_lifetime = timedelta(hours=settings.session_lifetime_hours)
 
 # Initialize database and scheduler on app startup
 _app_initialized = False
@@ -63,9 +68,104 @@ def run_async(coro):
         loop.close()
 
 
+# ============== Authentication ==============
+
+def login_required(f):
+    """Decorator to require login for a view."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        settings = get_settings()
+        # Skip auth check if auth is disabled
+        if not settings.auth_enabled:
+            return f(*args, **kwargs)
+        # Check if user is logged in
+        if not session.get("logged_in"):
+            flash("Please log in to access this page.", "warning")
+            return redirect(url_for("login", next=request.url))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def api_login_required(f):
+    """Decorator to require login for API endpoints (returns JSON error)."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        settings = get_settings()
+        # Skip auth check if auth is disabled
+        if not settings.auth_enabled:
+            return f(*args, **kwargs)
+        # Check if user is logged in
+        if not session.get("logged_in"):
+            return jsonify({"error": "Authentication required"}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    """Login page."""
+    settings = get_settings()
+
+    # If auth is disabled, redirect to dashboard
+    if not settings.auth_enabled:
+        return redirect(url_for("dashboard"))
+
+    # If already logged in, redirect to dashboard or next URL
+    if session.get("logged_in"):
+        next_url = request.args.get("next")
+        return redirect(next_url or url_for("dashboard"))
+
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+
+        # Check credentials against settings
+        # auth_password_hash can be plaintext (for dev) or werkzeug hash (for prod)
+        password_valid = False
+        if settings.auth_password_hash.startswith("pbkdf2:") or settings.auth_password_hash.startswith("scrypt:"):
+            # It's a hash - use check_password_hash
+            password_valid = check_password_hash(settings.auth_password_hash, password)
+        else:
+            # It's plaintext - direct comparison
+            password_valid = password == settings.auth_password_hash
+
+        if username == settings.auth_username and password_valid:
+            session["logged_in"] = True
+            session["username"] = username
+            session.permanent = True
+            flash("Login successful!", "success")
+
+            # Redirect to original destination or dashboard
+            next_url = request.args.get("next")
+            return redirect(next_url or url_for("dashboard"))
+        else:
+            flash("Invalid username or password.", "danger")
+
+    return render_template("login.html")
+
+
+@app.route("/logout")
+def logout():
+    """Logout the user."""
+    session.clear()
+    flash("You have been logged out.", "info")
+    return redirect(url_for("login"))
+
+
+@app.context_processor
+def inject_auth_context():
+    """Inject authentication context into all templates."""
+    settings = get_settings()
+    return {
+        "auth_enabled": settings.auth_enabled,
+        "current_user": session.get("username") if session.get("logged_in") else None,
+    }
+
+
 # ============== Dashboard ==============
 
 @app.route("/")
+@login_required
 def dashboard():
     """Main dashboard page."""
     stats = {
@@ -95,6 +195,7 @@ def dashboard():
 # ============== Single Scan ==============
 
 @app.route("/scan", methods=["GET", "POST"])
+@login_required
 def single_scan():
     """Single device scan page."""
     cred_provider = get_credential_provider()
@@ -169,6 +270,7 @@ def single_scan():
 # ============== Batch Scan ==============
 
 @app.route("/batch", methods=["GET", "POST"])
+@login_required
 def batch_scan():
     """Batch scan page."""
     import threading
@@ -270,6 +372,7 @@ def batch_scan():
 # ============== Inventory ==============
 
 @app.route("/inventory")
+@login_required
 def inventory():
     """Device inventory page."""
     devices = []
@@ -319,6 +422,7 @@ def inventory():
 
 
 @app.route("/inventory/<device_id>")
+@login_required
 def device_detail(device_id):
     """Device detail page with hardware inventory."""
     device = None
@@ -356,6 +460,7 @@ def device_detail(device_id):
 
 
 @app.route("/inventory/refresh-all", methods=["POST"])
+@login_required
 def refresh_all_devices():
     """Refresh all devices by re-scanning them with auto-discover."""
     import threading
@@ -432,6 +537,7 @@ def refresh_all_devices():
 
 
 @app.route("/inventory/<device_id>/rescan", methods=["POST"])
+@login_required
 def rescan_device(device_id):
     """Rescan a device - tries all profiles and collects full inventory."""
     try:
@@ -478,6 +584,7 @@ def rescan_device(device_id):
 # ============== Scan History ==============
 
 @app.route("/history")
+@login_required
 def scan_history():
     """Scan history page."""
     scans = []
@@ -511,6 +618,7 @@ def scan_history():
 # ============== Settings / Credentials ==============
 
 @app.route("/settings")
+@login_required
 def settings():
     """Settings page - list credentials and scheduler config."""
     cred_provider = get_credential_provider()
@@ -536,6 +644,7 @@ def settings():
 
 
 @app.route("/settings/credential/add", methods=["GET", "POST"])
+@login_required
 def add_credential():
     """Add new credential profile."""
     error = None
@@ -611,6 +720,7 @@ def add_credential():
 
 
 @app.route("/settings/credential/delete/<name>", methods=["POST"])
+@login_required
 def delete_credential(name):
     """Delete a credential profile."""
     cred_provider = get_credential_provider()
@@ -623,6 +733,7 @@ def delete_credential(name):
 
 
 @app.route("/settings/credential/priority/<name>", methods=["POST"])
+@login_required
 def update_credential_priority(name):
     """Update credential profile priority (move up or down)."""
     cred_provider = get_credential_provider()
@@ -673,6 +784,7 @@ def update_credential_priority(name):
 # ============== Scheduler Settings ==============
 
 @app.route("/settings/scheduler", methods=["POST"])
+@login_required
 def update_scheduler_settings():
     """Update scheduler settings."""
     from src.config.settings import Settings
@@ -731,6 +843,7 @@ def update_scheduler_settings():
 
 
 @app.route("/api/scheduler/status")
+@api_login_required
 def api_scheduler_status():
     """Get scheduler status as JSON."""
     scheduler = get_scheduler()
@@ -740,6 +853,7 @@ def api_scheduler_status():
 # ============== API Endpoints ==============
 
 @app.route("/api/scan", methods=["POST"])
+@api_login_required
 def api_scan():
     """API endpoint for single scan."""
     data = request.get_json()
@@ -786,6 +900,7 @@ def api_scan():
 
 
 @app.route("/api/devices")
+@api_login_required
 def api_devices():
     """API endpoint to list devices."""
     try:
@@ -817,6 +932,7 @@ def api_devices():
 # ============== Job Status API ==============
 
 @app.route("/api/jobs")
+@api_login_required
 def api_get_jobs():
     """Get recent scan jobs."""
     job_tracker = get_job_tracker()
@@ -825,6 +941,7 @@ def api_get_jobs():
 
 
 @app.route("/api/jobs/<job_id>")
+@api_login_required
 def api_get_job(job_id):
     """Get a specific job status."""
     job_tracker = get_job_tracker()
@@ -835,6 +952,7 @@ def api_get_job(job_id):
 
 
 @app.route("/api/jobs/<job_id>/cancel", methods=["POST"])
+@api_login_required
 def api_cancel_job(job_id):
     """Cancel a running job."""
     job_tracker = get_job_tracker()
@@ -846,6 +964,7 @@ def api_cancel_job(job_id):
 
 
 @app.route("/inventory/refresh-selected", methods=["POST"])
+@api_login_required
 def refresh_selected_devices():
     """Refresh selected devices by re-scanning them with auto-discover."""
     import threading
@@ -939,6 +1058,7 @@ def get_nautobot_client():
 
 
 @app.route("/nautobot")
+@login_required
 def nautobot_dashboard():
     """Nautobot integration dashboard."""
     settings = get_settings()
@@ -984,6 +1104,7 @@ def nautobot_dashboard():
 
 
 @app.route("/nautobot/test-connection", methods=["POST"])
+@api_login_required
 def nautobot_test_connection():
     """Test Nautobot API connection."""
     try:
@@ -1000,6 +1121,7 @@ def nautobot_test_connection():
 
 
 @app.route("/nautobot/status")
+@api_login_required
 def nautobot_status():
     """Get Nautobot integration status as JSON."""
     settings = get_settings()
@@ -1039,6 +1161,7 @@ def nautobot_status():
 
 
 @app.route("/nautobot/check-location-status", methods=["POST"])
+@api_login_required
 def nautobot_check_location_status():
     """Check location status for selected devices."""
     data = request.get_json()
@@ -1101,6 +1224,7 @@ def nautobot_check_location_status():
 
 
 @app.route("/nautobot/ensure-prefixes", methods=["POST"])
+@api_login_required
 def nautobot_ensure_prefixes():
     """Create missing prefixes/IPs in Nautobot for selected devices."""
     data = request.get_json()
@@ -1160,6 +1284,7 @@ def nautobot_ensure_prefixes():
 
 
 @app.route("/nautobot/sync", methods=["POST"])
+@api_login_required
 def nautobot_sync_devices():
     """Sync selected devices to Nautobot."""
     data = request.get_json()
@@ -1221,6 +1346,7 @@ def nautobot_sync_devices():
 
 
 @app.route("/nautobot/sync-all", methods=["POST"])
+@login_required
 def nautobot_sync_all_ready():
     """Sync all devices that are ready (have location) to Nautobot."""
     import threading
@@ -1301,6 +1427,7 @@ def nautobot_sync_all_ready():
 
 
 @app.route("/nautobot/refresh-status", methods=["POST"])
+@login_required
 def nautobot_refresh_status():
     """Refresh location status for all devices from Nautobot."""
     import threading
