@@ -387,16 +387,48 @@ class NautobotSyncService:
             # Ensure IP exists for the master
             ip_result = self.client.get_or_create_ip_address(ip_address)
 
+            # Pre-calculate member names and positions to ensure uniqueness
+            # For traditional stacks: index 1000 -> switch 1, 2000 -> switch 2, etc.
+            # For FEX or other cases where indices may collide: use enumeration
+            member_names = {}  # index -> name
+            member_positions = {}  # index -> vc_position
+            used_names = set()
+            used_positions = set()
+            for i, member in enumerate(stack_members):
+                member_index = member.get("index", 0)
+                switch_num = member_index // 1000 if member_index >= 1000 else member_index
+                candidate_name = f"{base_name}-{switch_num}"
+                candidate_position = switch_num
+
+                # If name already used, fall back to enumeration
+                if candidate_name in used_names:
+                    candidate_name = f"{base_name}-{i + 1}"
+                    candidate_position = i + 1
+                    # Keep incrementing if still a collision
+                    counter = i + 1
+                    while candidate_name in used_names:
+                        counter += 1
+                        candidate_name = f"{base_name}-{counter}"
+                        candidate_position = counter
+
+                # Ensure position is unique too
+                while candidate_position in used_positions:
+                    candidate_position += 1
+
+                member_names[member_index] = candidate_name
+                member_positions[member_index] = candidate_position
+                used_names.add(candidate_name)
+                used_positions.add(candidate_position)
+
             # Create devices for each stack member
             member_devices = {}  # index -> nautobot_device_id
             master_device_id = None
 
             for member in stack_members:
                 member_index = member.get("index", 0)
-                switch_num = member_index // 1000 if member_index >= 1000 else member_index
                 member_model = member.get("model") or device.model
                 member_serial = member.get("serial")
-                member_name = f"{base_name}-{switch_num}"
+                member_name = member_names[member_index]
                 # Get software version from stack member data or fall back to device software version
                 member_sw_version = member.get("software_version") or device.software_version
 
@@ -465,7 +497,7 @@ class NautobotSyncService:
             # Add all devices to the virtual chassis
             for member in stack_members:
                 member_index = member.get("index", 0)
-                switch_num = member_index // 1000 if member_index >= 1000 else member_index
+                vc_position = member_positions.get(member_index, 0)
                 member_device_id = member_devices.get(member_index)
 
                 if member_device_id:
@@ -481,7 +513,7 @@ class NautobotSyncService:
                     self.client.add_device_to_virtual_chassis(
                         device_id=member_device_id,
                         virtual_chassis_id=vc_id,
-                        vc_position=switch_num,
+                        vc_position=vc_position,
                         vc_priority=priority,
                     )
 
