@@ -388,36 +388,67 @@ class NautobotSyncService:
             ip_result = self.client.get_or_create_ip_address(ip_address)
 
             # Pre-calculate member names and positions to ensure uniqueness
-            # For traditional stacks: index 1000 -> switch 1, 2000 -> switch 2, etc.
-            # For FEX or other cases where indices may collide: use enumeration
-            # Use list index as key since inventory index may not be unique
             # Note: Nautobot vc_position must be 0-255
             member_names = []  # list index -> name
             member_positions = []  # list index -> vc_position (0-255)
             used_names = set()
             used_positions = set()
+
+            def extract_fex_number(member: dict) -> int | None:
+                """Extract FEX number from description or name (e.g., 'FEX 101' -> 101)."""
+                import re
+                for field in ["description", "name"]:
+                    text = member.get(field) or ""
+                    # Look for FEX followed by a number
+                    match = re.search(r"FEX[- ]?(\d+)", text, re.IGNORECASE)
+                    if match:
+                        return int(match.group(1))
+                return None
+
+            def is_fex_module(member: dict) -> bool:
+                """Check if this member is a FEX module."""
+                model = (member.get("model") or "").upper()
+                if model.startswith("N2K"):
+                    return True
+                desc = (member.get("description") or "").upper()
+                return "FABRIC EXTENDER" in desc or "FEX" in desc
+
             for i, member in enumerate(stack_members):
                 member_index = member.get("index", 0)
-                switch_num = member_index // 1000 if member_index >= 1000 else member_index
+                member_model = (member.get("model") or "").upper()
+
+                # Determine the switch/FEX number for naming
+                if is_fex_module(member):
+                    # For FEX, try to extract FEX number from description
+                    fex_num = extract_fex_number(member)
+                    if fex_num:
+                        switch_num = fex_num
+                    else:
+                        # Fallback to enumeration starting from 100
+                        switch_num = 100 + i
+                elif member_index >= 1000:
+                    # Traditional stack: index 1000 -> switch 1, 2000 -> switch 2
+                    switch_num = member_index // 1000
+                else:
+                    # Parent chassis or other: use 0 for master
+                    switch_num = member_index
+
                 candidate_name = f"{base_name}-{switch_num}"
-                # Start with enumeration-based position (0, 1, 2...) to stay within 0-255
-                candidate_position = i
+                candidate_position = switch_num if switch_num <= 255 else i
 
                 # If name already used, fall back to enumeration
                 if candidate_name in used_names:
                     candidate_name = f"{base_name}-{i + 1}"
-                    # Keep incrementing if still a collision
+                    candidate_position = i + 1
                     counter = i + 1
                     while candidate_name in used_names:
                         counter += 1
                         candidate_name = f"{base_name}-{counter}"
+                        candidate_position = counter
 
-                # Ensure position is unique (should always be since we use i, but just in case)
-                while candidate_position in used_positions:
-                    candidate_position += 1
-                # Nautobot requires vc_position <= 255
-                if candidate_position > 255:
-                    candidate_position = candidate_position % 256
+                # Ensure position is unique and within 0-255
+                while candidate_position in used_positions or candidate_position > 255:
+                    candidate_position = (candidate_position + 1) % 256
 
                 member_names.append(candidate_name)
                 member_positions.append(candidate_position)
