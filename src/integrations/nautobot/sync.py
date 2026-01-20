@@ -390,8 +390,9 @@ class NautobotSyncService:
             # Pre-calculate member names and positions to ensure uniqueness
             # For traditional stacks: index 1000 -> switch 1, 2000 -> switch 2, etc.
             # For FEX or other cases where indices may collide: use enumeration
-            member_names = {}  # index -> name
-            member_positions = {}  # index -> vc_position
+            # Use list index as key since inventory index may not be unique
+            member_names = []  # list index -> name
+            member_positions = []  # list index -> vc_position
             used_names = set()
             used_positions = set()
             for i, member in enumerate(stack_members):
@@ -415,20 +416,19 @@ class NautobotSyncService:
                 while candidate_position in used_positions:
                     candidate_position += 1
 
-                member_names[member_index] = candidate_name
-                member_positions[member_index] = candidate_position
+                member_names.append(candidate_name)
+                member_positions.append(candidate_position)
                 used_names.add(candidate_name)
                 used_positions.add(candidate_position)
 
             # Create devices for each stack member
-            member_devices = {}  # index -> nautobot_device_id
+            member_devices = []  # list index -> nautobot_device_id
             master_device_id = None
 
-            for member in stack_members:
-                member_index = member.get("index", 0)
+            for i, member in enumerate(stack_members):
                 member_model = member.get("model") or device.model
                 member_serial = member.get("serial")
-                member_name = member_names[member_index]
+                member_name = member_names[i]
                 # Get software version from stack member data or fall back to device software version
                 member_sw_version = member.get("software_version") or device.software_version
 
@@ -479,7 +479,7 @@ class NautobotSyncService:
                         platform_name=device.platform,
                     )
 
-                member_devices[member_index] = member_device_id
+                member_devices.append(member_device_id)
 
                 # First member (lowest index) is the master and gets the primary IP
                 if master_device_id is None:
@@ -495,10 +495,9 @@ class NautobotSyncService:
             vc_id = self.client.get_or_create_virtual_chassis(vc_name, master_device_id)
 
             # Add all devices to the virtual chassis
-            for member in stack_members:
-                member_index = member.get("index", 0)
-                vc_position = member_positions.get(member_index, 0)
-                member_device_id = member_devices.get(member_index)
+            for i, member in enumerate(stack_members):
+                vc_position = member_positions[i]
+                member_device_id = member_devices[i]
 
                 if member_device_id:
                     # Determine priority (higher for master/standby)
@@ -522,9 +521,23 @@ class NautobotSyncService:
                 self.client.set_virtual_chassis_master(vc_id, master_device_id)
 
             # Sync inventory items to appropriate stack member devices
+            # Build index->device_id mapping for inventory items
+            # For traditional stacks, use inventory index; for FEX (all same index), use first device
+            member_device_map = {}
+            for i, member in enumerate(stack_members):
+                inv_index = member.get("index", 0)
+                # Only add if not already mapped (first occurrence wins)
+                if inv_index not in member_device_map:
+                    member_device_map[inv_index] = member_devices[i]
+            # Also map high indices (1000, 2000, etc.) for traditional stacks
+            for i, member in enumerate(stack_members):
+                inv_index = member.get("index", 0)
+                if inv_index >= 1000:
+                    member_device_map[inv_index] = member_devices[i]
+
             self._sync_stack_inventory_items(
                 inventory=inventory,
-                member_devices=member_devices,
+                member_devices=member_device_map,
                 manufacturer_id=manufacturer_id,
             )
 
