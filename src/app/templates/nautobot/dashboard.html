@@ -157,6 +157,26 @@
     </div>
 </div>
 
+<!-- Job Progress Section -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-hourglass-split"></i> Nautobot Jobs</h5>
+                <button class="btn btn-sm btn-outline-secondary" onclick="refreshJobs()">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh
+                </button>
+            </div>
+            <div class="card-body" id="jobs-container">
+                <div class="text-center py-3 text-muted" id="no-jobs-message">
+                    <i class="bi bi-inbox display-6"></i>
+                    <p class="mt-2 mb-0 small">No recent Nautobot jobs. Start an action above to see progress here.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Status Legend -->
 <div class="row">
     <div class="col-md-12">
@@ -208,6 +228,10 @@
 {% endif %}
 
 <script>
+// Auto-refresh jobs every 2 seconds if there are running jobs
+let refreshInterval = null;
+const nautobotJobTypes = ['nautobot_sync', 'nautobot_status_check', 'nautobot_check_status', 'nautobot_ensure_prefixes'];
+
 function testConnection() {
     const btn = event.target;
     const originalHtml = btn.innerHTML;
@@ -230,5 +254,149 @@ function testConnection() {
             btn.innerHTML = originalHtml;
         });
 }
+
+function cancelJob(jobId) {
+    if (!confirm('Are you sure you want to cancel this job?')) {
+        return;
+    }
+
+    fetch(`/api/jobs/${jobId}/cancel`, {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            refreshJobs();
+        } else {
+            alert('Failed to cancel: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => {
+        alert('Error cancelling job: ' + err);
+    });
+}
+
+function refreshJobs() {
+    fetch('/api/jobs')
+        .then(response => response.json())
+        .then(data => {
+            // Filter to only Nautobot-related jobs
+            const nautobotJobs = data.jobs.filter(j => nautobotJobTypes.includes(j.job_type));
+            updateJobsDisplay(nautobotJobs);
+
+            // Check if any jobs are running
+            const hasRunning = nautobotJobs.some(j => j.status === 'running');
+            if (hasRunning && !refreshInterval) {
+                refreshInterval = setInterval(refreshJobs, 2000);
+            } else if (!hasRunning && refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+                // Reload the page to update stats after jobs complete
+                if (nautobotJobs.length > 0) {
+                    setTimeout(() => location.reload(), 500);
+                }
+            }
+        })
+        .catch(err => console.error('Failed to refresh jobs:', err));
+}
+
+function getJobLabel(jobType) {
+    const labels = {
+        'nautobot_sync': 'Sync to Nautobot',
+        'nautobot_status_check': 'Check Location Status',
+        'nautobot_check_status': 'Check Location Status',
+        'nautobot_ensure_prefixes': 'Create Prefixes/IPs'
+    };
+    return labels[jobType] || jobType;
+}
+
+function updateJobsDisplay(jobs) {
+    const container = document.getElementById('jobs-container');
+
+    if (jobs.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-3 text-muted" id="no-jobs-message">
+                <i class="bi bi-inbox display-6"></i>
+                <p class="mt-2 mb-0 small">No recent Nautobot jobs. Start an action above to see progress here.</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '';
+    for (const job of jobs) {
+        const isRunning = job.status === 'running';
+        const isCompleted = job.status === 'completed';
+        const isCancelled = job.status === 'cancelled';
+        const isFailed = job.status === 'failed';
+
+        let statusBadge = '';
+        if (isRunning) {
+            statusBadge = `<span class="badge bg-primary me-2"><span class="spinner-border spinner-border-sm" role="status"></span> Running</span>
+                           <button type="button" class="btn btn-sm btn-outline-danger" onclick="cancelJob('${job.id}')">
+                               <i class="bi bi-x-circle"></i> Cancel
+                           </button>`;
+        } else if (isCompleted) {
+            statusBadge = '<span class="badge bg-success">Completed</span>';
+        } else if (isCancelled) {
+            statusBadge = '<span class="badge bg-warning">Cancelled</span>';
+        } else if (isFailed) {
+            statusBadge = '<span class="badge bg-danger">Failed</span>';
+        } else {
+            statusBadge = `<span class="badge bg-secondary">${job.status}</span>`;
+        }
+
+        const jobLabel = getJobLabel(job.job_type);
+
+        html += `
+            <div class="job-item mb-3 p-3 border rounded ${isRunning ? 'border-primary' : ''}" id="job-${job.id}">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                        <strong><i class="bi bi-cloud-upload"></i> ${jobLabel}</strong>
+                        <small class="text-muted ms-2">${job.id.substring(0, 8)}...</small>
+                    </div>
+                    <div>${statusBadge}</div>
+                </div>
+
+                ${(isRunning || isCompleted || isCancelled) ? `
+                    <div class="progress mb-2" style="height: 20px;">
+                        <div class="progress-bar ${isCompleted ? 'bg-success' : (isCancelled ? 'bg-warning' : '')}"
+                             role="progressbar"
+                             style="width: ${job.progress_percent}%"
+                             aria-valuenow="${job.progress_percent}"
+                             aria-valuemin="0"
+                             aria-valuemax="100">
+                            ${job.progress_percent}%
+                        </div>
+                    </div>
+                ` : ''}
+
+                <div class="d-flex justify-content-between text-muted small">
+                    <span>
+                        <i class="bi bi-check-circle text-success"></i> ${job.success_count} success
+                        <i class="bi bi-x-circle text-danger ms-2"></i> ${job.fail_count} failed
+                    </span>
+                    <span>${job.completed_count} / ${job.total_targets} devices</span>
+                </div>
+
+                ${job.error ? `<div class="alert alert-danger mt-2 mb-0 py-1 small">${job.error}</div>` : ''}
+
+                ${job.started_at ? `
+                    <div class="text-muted small mt-1">
+                        Started: ${new Date(job.started_at).toLocaleString()}
+                        ${job.completed_at ? `| Completed: ${new Date(job.completed_at).toLocaleString()}` : ''}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    container.innerHTML = html;
+}
+
+// Start auto-refresh on page load
+document.addEventListener('DOMContentLoaded', function() {
+    refreshJobs();
+});
 </script>
 {% endblock %}
