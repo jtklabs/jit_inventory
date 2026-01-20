@@ -391,30 +391,33 @@ class NautobotSyncService:
             # For traditional stacks: index 1000 -> switch 1, 2000 -> switch 2, etc.
             # For FEX or other cases where indices may collide: use enumeration
             # Use list index as key since inventory index may not be unique
+            # Note: Nautobot vc_position must be 0-255
             member_names = []  # list index -> name
-            member_positions = []  # list index -> vc_position
+            member_positions = []  # list index -> vc_position (0-255)
             used_names = set()
             used_positions = set()
             for i, member in enumerate(stack_members):
                 member_index = member.get("index", 0)
                 switch_num = member_index // 1000 if member_index >= 1000 else member_index
                 candidate_name = f"{base_name}-{switch_num}"
-                candidate_position = switch_num
+                # Start with enumeration-based position (0, 1, 2...) to stay within 0-255
+                candidate_position = i
 
                 # If name already used, fall back to enumeration
                 if candidate_name in used_names:
                     candidate_name = f"{base_name}-{i + 1}"
-                    candidate_position = i + 1
                     # Keep incrementing if still a collision
                     counter = i + 1
                     while candidate_name in used_names:
                         counter += 1
                         candidate_name = f"{base_name}-{counter}"
-                        candidate_position = counter
 
-                # Ensure position is unique too
+                # Ensure position is unique (should always be since we use i, but just in case)
                 while candidate_position in used_positions:
                     candidate_position += 1
+                # Nautobot requires vc_position <= 255
+                if candidate_position > 255:
+                    candidate_position = candidate_position % 256
 
                 member_names.append(candidate_name)
                 member_positions.append(candidate_position)
