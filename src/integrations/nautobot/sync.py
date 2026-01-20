@@ -657,20 +657,32 @@ class NautobotSyncService:
             if contained_in in member_devices:
                 return member_devices[contained_in]
 
-            # For high indices (1000+), find the nearest stack member
-            # E.g., contained_in=1500 should map to index 1000
-            if contained_in >= 1000:
-                stack_index = (contained_in // 1000) * 1000
-                return member_devices.get(stack_index)
-
             # For low indices (< 1000), map to the parent chassis
-            # Parent chassis typically has index 1, but components may have
-            # contained_in values like 1, 2, 3, etc. - all belong to parent
-            # Find the lowest index in member_devices (that's the parent)
-            low_indices = [idx for idx in member_devices.keys() if idx < 1000]
-            if low_indices:
-                parent_index = min(low_indices)
-                return member_devices.get(parent_index)
+            if contained_in < 1000:
+                low_indices = [idx for idx in member_devices.keys() if idx < 1000]
+                if low_indices:
+                    parent_index = min(low_indices)
+                    return member_devices.get(parent_index)
+                return None
+
+            # For high indices (1000+), find the member whose index is the
+            # largest value <= contained_in. Components are contained within
+            # the chassis/FEX that has the nearest lower index.
+            # E.g., if FEX is at 10000 and PSU is at 10005, PSU belongs to FEX 10000
+            high_indices = sorted([idx for idx in member_devices.keys() if idx >= 1000])
+            if not high_indices:
+                return None
+
+            # Find the largest index that is <= contained_in
+            best_match = None
+            for idx in high_indices:
+                if idx <= contained_in:
+                    best_match = idx
+                else:
+                    break
+
+            if best_match is not None:
+                return member_devices.get(best_match)
 
             return None
 
